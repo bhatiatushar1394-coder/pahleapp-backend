@@ -96,9 +96,10 @@ def transition(complaint, to_status, actor, note=""):
     return history
 
 
-@api_view(["POST"])
+@api_view(["GET"])
 @permission_classes([AllowAny])
-def login_view(request):
+def health_view(request):
+    return Response({"status": "ok"})
     serializer = LoginSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     try:

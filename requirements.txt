@@ -6,3 +6,5 @@ Pillow==12.3.0
 PyJWT==2.13.0
 asgiref==3.12.1
 sqlparse==0.6.0
+gunicorn==23.0.0
+whitenoise==6.9.0

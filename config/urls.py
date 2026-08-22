@@ -8,5 +8,5 @@ urlpatterns = [
     path("api/", include("maintenance.urls")),
 ]
 
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Serve uploaded complaint photos on free hosts (SQLite/local disk demo).
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

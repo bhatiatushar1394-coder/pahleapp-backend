@@ -11,6 +11,7 @@ router.register("complaints", views.ComplaintViewSet, basename="complaint")
 urlpatterns = [
     path("auth/login/", views.login_view),
     path("auth/me/", views.me_view),
+    path("health/", views.health_view),
     path("meta/", views.meta_view),
     path("dashboard/", views.dashboard_view),
     path("reports/", views.reports_export),
