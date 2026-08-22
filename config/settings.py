@@ -91,16 +91,22 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-cors_default = "http://localhost:3000,http://127.0.0.1:3000"
-CORS_ALLOWED_ORIGINS = [
+cors_default = "http://localhost:3000,http://127.0.0.1:3000,https://pahleapp-frontend.vercel.app"
+env_origins = [
     origin.strip()
     for origin in os.environ.get("CORS_ALLOWED_ORIGINS", cors_default).split(",")
     if origin.strip()
+]
+# Always keep local + production frontend origins, even if Render env replaces the default.
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys(env_origins + cors_default.split(",")))
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://.*\.vercel\.app$",
 ]
 CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS)
 if render_host:
     CSRF_TRUSTED_ORIGINS.append(f"https://{render_host}")
+CSRF_TRUSTED_ORIGINS.append("https://*.vercel.app")
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
