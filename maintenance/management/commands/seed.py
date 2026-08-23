@@ -1,15 +1,21 @@
 from datetime import timedelta
+from io import BytesIO
 
+from django.contrib.auth.hashers import make_password
+from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand
 from django.utils import timezone
+from PIL import Image, ImageDraw, ImageFont
 
 from maintenance.constants import SLA_HOURS
 from maintenance.models import (
     Complaint,
     ComplaintFeedback,
+    ComplaintMedia,
     ConsumerPump,
     DivisionalOffice,
     PumpFacility,
+    RegistrationRequest,
     SalesArea,
     StatusHistory,
     User,
@@ -17,6 +23,24 @@ from maintenance.models import (
 )
 
 PASSWORD = "Pahle@123"
+
+
+def proof_file(label, bg):
+    img = Image.new("RGB", (800, 500), bg)
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((16, 16, 784, 484), outline=(255, 255, 255), width=6)
+    font = ImageFont.load_default()
+    draw.text((48, 220), label, fill=(255, 255, 255), font=font)
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    buf.seek(0)
+    slug = label.lower().replace(" ", "_")
+    return ContentFile(buf.getvalue(), name=f"{slug}.jpg")
+
+
+def attach_proof(complaint, uploaded_by, kind, label, color):
+    rec = ComplaintMedia(complaint=complaint, kind=kind, uploaded_by=uploaded_by)
+    rec.file.save(f"{complaint.complaint_id}_{kind.lower()}.jpg", proof_file(label, color), save=True)
 
 
 def user(username, first, last, role, **kwargs):
@@ -45,6 +69,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         Complaint.objects.all().delete()
+        RegistrationRequest.objects.all().delete()
         Vendor.objects.all().delete()
         PumpFacility.objects.all().delete()
         ConsumerPump.objects.all().delete()
@@ -211,6 +236,9 @@ class Command(BaseCommand):
             ],
             himanshu,
         )
+        attach_proof(c1, metro_user, ComplaintMedia.Kind.USER_PHOTO, "User photo — DU #2 trip", (0, 48, 135))
+        attach_proof(c1, apex_user, ComplaintMedia.Kind.BEFORE_PROOF, "Before — faulty CVT regulator", (212, 85, 18))
+        attach_proof(c1, apex_user, ComplaintMedia.Kind.AFTER_PROOF, "After — replaced 5KVA module", (3, 48, 135))
 
         c2 = Complaint.objects.create(
             complaint_id="CMP-2026-002",
@@ -439,6 +467,9 @@ class Command(BaseCommand):
             remarks="Great service, completed well within time.",
             submitted_by=metro_user,
         )
+        attach_proof(c0, metro_user, ComplaintMedia.Kind.USER_PHOTO, "User photo — canopy dark", (0, 48, 135))
+        attach_proof(c0, apex_user, ComplaintMedia.Kind.BEFORE_PROOF, "Before — failed fittings", (243, 108, 33))
+        attach_proof(c0, apex_user, ComplaintMedia.Kind.AFTER_PROOF, "After — LED fittings restored", (0, 48, 135))
 
         # Extra closed jobs so vendor cards show completed counts close to the mockup
         extra = [
@@ -468,5 +499,27 @@ class Command(BaseCommand):
             ComplaintFeedback.objects.create(
                 complaint=closed, resolved=True, rating=5, remarks="OK", submitted_by=submitter
             )
+
+        RegistrationRequest.objects.create(
+            kind=RegistrationRequest.Kind.VENDOR,
+            username="spark.vendor",
+            password_hash=make_password(PASSWORD),
+            first_name="Ravi",
+            last_name="Mehta",
+            email="ravi@sparktech.example",
+            phone="+91 98111 22334",
+            organization_name="Spark Tech Electricals",
+            specialization=Vendor.Specialization.ELECTRICAL,
+        )
+        RegistrationRequest.objects.create(
+            kind=RegistrationRequest.Kind.CP_USER,
+            username="cantt.cp",
+            password_hash=make_password(PASSWORD),
+            first_name="Asha",
+            last_name="Singh",
+            email="asha.singh@cantt.example",
+            phone="+91 98222 33445",
+            consumer_pump=p1,
+        )
 
         self.stdout.write(self.style.SUCCESS("Seeded PAHLE-APP demo data. Password for all users: Pahle@123"))
