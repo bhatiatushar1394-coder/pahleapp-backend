@@ -75,6 +75,8 @@ def _deliver_emails(payload):
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "PAHLE-APP/1.0",
             },
             method="POST",
         )
