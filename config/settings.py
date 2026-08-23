@@ -157,3 +157,20 @@ EMAIL_BACKEND = (
     if EMAIL_HOST_PASSWORD
     else "django.core.mail.backends.console.EmailBackend"
 )
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "loggers": {
+        "maintenance.notifications": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": True,
+        },
+    },
+}

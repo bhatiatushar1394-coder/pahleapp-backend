@@ -35,16 +35,23 @@ def _unique_users(users, exclude=None):
 
 def _can_email(user):
     address = (getattr(user, "email", "") or "").strip()
+    username = getattr(user, "username", "?")
     if "@" not in address:
+        logger.warning("email skip user=%s reason=no_address", username)
         return False
     lowered = address.lower()
-    return not any(lowered.endswith(suffix) for suffix in _SKIP_EMAIL_SUFFIXES)
+    if any(lowered.endswith(suffix) for suffix in _SKIP_EMAIL_SUFFIXES):
+        logger.warning("email skip user=%s to=%s reason=placeholder_address", username, address)
+        return False
+    return True
 
 
 def _email_suppressed():
     if not getattr(settings, "EMAIL_HOST_PASSWORD", ""):
+        logger.warning("email suppressed reason=missing_EMAIL_HOST_PASSWORD")
         return True
     if "seed" in sys.argv:
+        logger.info("email suppressed reason=seed_command")
         return True
     return False
 
@@ -71,13 +78,21 @@ def _deliver_emails(payload):
             },
             method="POST",
         )
+        logger.info("email sending to=%s subject=%s", to_addr, subject)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                resp.read()
+                raw = resp.read().decode("utf-8", errors="replace")
+            mail_id = ""
+            try:
+                mail_id = json.loads(raw).get("id") or ""
+            except json.JSONDecodeError:
+                pass
+            logger.info("email sent to=%s resend_id=%s", to_addr, mail_id)
         except urllib.error.HTTPError as exc:
-            logger.warning("Resend rejected mail to %s (%s)", to_addr, exc.code)
+            detail = exc.read().decode("utf-8", errors="replace")[:500]
+            logger.warning("email rejected to=%s status=%s body=%s", to_addr, exc.code, detail)
         except Exception:
-            logger.exception("Resend send failed for %s", to_addr)
+            logger.exception("email failed to=%s", to_addr)
 
 
 def _send_emails(recipients, title, body, link=""):
@@ -94,14 +109,27 @@ def _send_emails(recipients, title, body, link=""):
             continue
         payload.append((f"PAHLE-APP: {title}", text or title, user.email.strip()))
     if not payload:
+        logger.warning(
+            "email not queued title=%s reason=no_real_recipients in_app_users=%s",
+            title,
+            ",".join(u.username for u in recipients) or "-",
+        )
         return
-    threading.Thread(target=_deliver_emails, args=(payload,), daemon=True).start()
+    logger.info("email queued title=%s to=%s", title, ",".join(item[2] for item in payload))
+    threading.Thread(target=_deliver_emails, args=(payload,), daemon=True, name="pahle-email").start()
 
 
 def notify(users, *, kind, title, body="", link="", complaint=None, registration=None, exclude=None):
     recipients = _unique_users(users, exclude=exclude)
     if not recipients:
+        logger.warning("notify skipped kind=%s title=%s reason=no_recipients", kind, title)
         return
+    logger.info(
+        "in-app notify kind=%s title=%s users=%s",
+        kind,
+        title,
+        ",".join(u.username for u in recipients),
+    )
     Notification.objects.bulk_create(
         [
             Notification(
@@ -218,6 +246,16 @@ def notify_registration(rec: RegistrationRequest):
 
 def notify_registration_decision(rec: RegistrationRequest, user: User):
     approved = rec.status == RegistrationRequest.Status.APPROVED
+    logger.info(
+        "registration decision username=%s approved=%s user_email=%s request_email=%s",
+        rec.username,
+        approved,
+        user.email,
+        rec.email,
+    )
+    if rec.email and user.email != rec.email:
+        user.email = rec.email
+        user.save(update_fields=["email"])
     notify(
         [user],
         kind=Notification.Kind.REGISTRATION,
