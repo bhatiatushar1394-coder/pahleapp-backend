@@ -13,6 +13,7 @@ from .models import (
     StatusHistory,
     User,
     Vendor,
+    Notification,
 )
 
 
@@ -440,3 +441,22 @@ class RegistrationRequestSerializer(serializers.ModelSerializer):
 
     def get_reviewed_by_name(self, obj):
         return obj.reviewed_by.get_full_name() if obj.reviewed_by else ""
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    kind_label = serializers.CharField(source="get_kind_display", read_only=True)
+
+    class Meta:
+        model = Notification
+        fields = [
+            "id",
+            "kind",
+            "kind_label",
+            "title",
+            "body",
+            "link",
+            "is_read",
+            "created_at",
+            "complaint",
+            "registration",
+        ]

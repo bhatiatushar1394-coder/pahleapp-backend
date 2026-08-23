@@ -8,6 +8,7 @@ from django.utils import timezone
 from PIL import Image, ImageDraw, ImageFont
 
 from maintenance.constants import SLA_HOURS
+from maintenance.notifications import notify_new_complaint, notify_registration, notify_transition
 from maintenance.models import (
     Complaint,
     ComplaintFeedback,
@@ -20,6 +21,7 @@ from maintenance.models import (
     StatusHistory,
     User,
     Vendor,
+    Notification,
 )
 
 PASSWORD = "Pahle@123"
@@ -69,6 +71,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         Complaint.objects.all().delete()
+        Notification.objects.all().delete()
         RegistrationRequest.objects.all().delete()
         Vendor.objects.all().delete()
         PumpFacility.objects.all().delete()
@@ -239,6 +242,7 @@ class Command(BaseCommand):
         attach_proof(c1, metro_user, ComplaintMedia.Kind.USER_PHOTO, "User photo — DU #2 trip", (0, 48, 135))
         attach_proof(c1, apex_user, ComplaintMedia.Kind.BEFORE_PROOF, "Before — faulty CVT regulator", (212, 85, 18))
         attach_proof(c1, apex_user, ComplaintMedia.Kind.AFTER_PROOF, "After — replaced 5KVA module", (3, 48, 135))
+        notify_transition(c1, apex_user, Complaint.Status.WORK_IN_PROGRESS, Complaint.Status.WORK_COMPLETION)
 
         c2 = Complaint.objects.create(
             complaint_id="CMP-2026-002",
@@ -292,6 +296,7 @@ class Command(BaseCommand):
             ],
             anil,
         )
+        notify_transition(c3, anil, Complaint.Status.ASSIGNED_TO_OFFICER, Complaint.Status.ASSIGNED_TO_VENDOR)
 
         c4 = Complaint.objects.create(
             complaint_id="CMP-2026-004",
@@ -428,6 +433,7 @@ class Command(BaseCommand):
                 ],
                 item["user"],
             )
+            notify_new_complaint(ticket)
 
         c0 = Complaint.objects.create(
             complaint_id="CMP-2026-000",
@@ -500,7 +506,7 @@ class Command(BaseCommand):
                 complaint=closed, resolved=True, rating=5, remarks="OK", submitted_by=submitter
             )
 
-        RegistrationRequest.objects.create(
+        spark = RegistrationRequest.objects.create(
             kind=RegistrationRequest.Kind.VENDOR,
             username="spark.vendor",
             password_hash=make_password(PASSWORD),
@@ -511,7 +517,7 @@ class Command(BaseCommand):
             organization_name="Spark Tech Electricals",
             specialization=Vendor.Specialization.ELECTRICAL,
         )
-        RegistrationRequest.objects.create(
+        cantt = RegistrationRequest.objects.create(
             kind=RegistrationRequest.Kind.CP_USER,
             username="cantt.cp",
             password_hash=make_password(PASSWORD),
@@ -521,5 +527,7 @@ class Command(BaseCommand):
             phone="+91 98222 33445",
             consumer_pump=p1,
         )
+        notify_registration(spark)
+        notify_registration(cantt)
 
         self.stdout.write(self.style.SUCCESS("Seeded PAHLE-APP demo data. Password for all users: Pahle@123"))

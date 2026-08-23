@@ -19,12 +19,14 @@ from .models import (
     ComplaintMedia,
     ConsumerPump,
     DivisionalOffice,
+    Notification,
     RegistrationRequest,
     SalesArea,
     StatusHistory,
     User,
     Vendor,
 )
+from .notifications import notify_new_complaint, notify_registration, notify_registration_decision, notify_transition
 from .permissions import OFFICER_ROLES, IsAdmin, IsOfficer
 from .serializers import (
     ComplaintSerializer,
@@ -37,6 +39,7 @@ from .serializers import (
     UserProfileUpdateSerializer,
     UserPublicSerializer,
     VendorSerializer,
+    NotificationSerializer,
 )
 
 
@@ -86,10 +89,11 @@ def scoped_pumps(user):
     return qs.none()
 
 
-def transition(complaint, to_status, actor, note=""):
+def transition(complaint, to_status, actor, note="", notify=True):
+    from_status = complaint.status
     history = StatusHistory.objects.create(
         complaint=complaint,
-        from_status=complaint.status,
+        from_status=from_status,
         to_status=to_status,
         actor=actor,
         note=note,
@@ -98,6 +102,8 @@ def transition(complaint, to_status, actor, note=""):
     if to_status == Complaint.Status.CLOSED:
         complaint.closed_at = timezone.now()
     complaint.save()
+    if notify:
+        notify_transition(complaint, actor, from_status, to_status)
     return history
 
 
@@ -184,6 +190,7 @@ def register_view(request):
         specialization=spec if data["kind"] == RegistrationRequest.Kind.VENDOR else "",
         consumer_pump=pump if data["kind"] == RegistrationRequest.Kind.CP_USER else None,
     )
+    notify_registration(rec)
     return Response(RegistrationRequestSerializer(rec).data, status=201)
 
 
@@ -238,6 +245,7 @@ class RegistrationViewSet(viewsets.ReadOnlyModelViewSet):
         rec.reviewed_at = timezone.now()
         rec.admin_note = request.data.get("admin_note", rec.admin_note)
         rec.save()
+        notify_registration_decision(rec, user)
         return Response(RegistrationRequestSerializer(rec).data)
 
     @action(detail=True, methods=["post"])
@@ -486,6 +494,7 @@ class ComplaintViewSet(viewsets.ModelViewSet):
             ComplaintMedia.objects.create(
                 complaint=complaint, kind=kind, file=f, uploaded_by=self.request.user
             )
+        notify_new_complaint(complaint)
 
     @action(detail=True, methods=["post"], url_path="assign-vendor")
     def assign_vendor(self, request, pk=None):
@@ -580,7 +589,7 @@ class ComplaintViewSet(viewsets.ModelViewSet):
             },
         )
         if resolved:
-            transition(complaint, Complaint.Status.USER_CONFIRMATION, request.user, "User confirmed")
+            transition(complaint, Complaint.Status.USER_CONFIRMATION, request.user, "User confirmed", notify=False)
             transition(complaint, Complaint.Status.CLOSED, request.user, "Closed")
             vendor = complaint.assigned_vendor
             if vendor:
@@ -594,6 +603,36 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         else:
             transition(complaint, Complaint.Status.WORK_IN_PROGRESS, request.user, "Re-work requested")
         return Response(self.get_serializer(complaint).data)
+
+
+class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = NotificationSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Notification.objects.filter(recipient=self.request.user)
+
+    def list(self, request, *args, **kwargs):
+        qs = self.get_queryset()[:50]
+        unread = self.get_queryset().filter(is_read=False).count()
+        return Response(
+            {
+                "unread": unread,
+                "results": NotificationSerializer(qs, many=True).data,
+            }
+        )
+
+    @action(detail=True, methods=["post"])
+    def read(self, request, pk=None):
+        rec = self.get_object()
+        rec.is_read = True
+        rec.save(update_fields=["is_read"])
+        return Response(NotificationSerializer(rec).data)
+
+    @action(detail=False, methods=["post"], url_path="read-all")
+    def read_all(self, request):
+        updated = self.get_queryset().filter(is_read=False).update(is_read=True)
+        return Response({"updated": updated})
 
 
 @api_view(["GET"])

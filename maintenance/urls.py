@@ -9,6 +9,7 @@ router.register("vendors", views.VendorViewSet, basename="vendor")
 router.register("complaints", views.ComplaintViewSet, basename="complaint")
 
 router.register("registrations", views.RegistrationViewSet, basename="registration")
+router.register("notifications", views.NotificationViewSet, basename="notification")
 
 urlpatterns = [
     path("auth/login/", views.login_view),

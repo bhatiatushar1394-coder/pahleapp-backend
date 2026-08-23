@@ -236,3 +236,33 @@ class RegistrationRequest(models.Model):
 
     def __str__(self):
         return f"{self.username} ({self.kind}) {self.status}"
+
+
+class Notification(models.Model):
+    class Kind(models.TextChoices):
+        NEW_COMPLAINT = "NEW_COMPLAINT", "New complaint"
+        ASSIGN_VENDOR = "ASSIGN_VENDOR", "Assign vendor"
+        VENDOR_ASSIGNED = "VENDOR_ASSIGNED", "Assigned to vendor"
+        STATUS = "STATUS", "Status update"
+        REGISTRATION = "REGISTRATION", "Registration"
+
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
+    kind = models.CharField(max_length=32, choices=Kind.choices)
+    title = models.CharField(max_length=180)
+    body = models.CharField(max_length=400, blank=True)
+    link = models.CharField(max_length=255, blank=True)
+    complaint = models.ForeignKey(
+        Complaint, null=True, blank=True, on_delete=models.CASCADE, related_name="notifications"
+    )
+    registration = models.ForeignKey(
+        RegistrationRequest, null=True, blank=True, on_delete=models.CASCADE, related_name="notifications"
+    )
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["recipient", "is_read", "-created_at"])]
+
+    def __str__(self):
+        return f"{self.recipient_id}: {self.title}"
