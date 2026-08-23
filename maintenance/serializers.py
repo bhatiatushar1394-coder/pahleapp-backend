@@ -8,6 +8,7 @@ from .models import (
     ConsumerPump,
     DivisionalOffice,
     PumpFacility,
+    RegistrationRequest,
     SalesArea,
     StatusHistory,
     User,
@@ -22,6 +23,7 @@ class UserPublicSerializer(serializers.ModelSerializer):
     do_label = serializers.SerializerMethodField()
     pump_name = serializers.SerializerMethodField()
     vendor_id = serializers.SerializerMethodField()
+    vendor_name = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -42,6 +44,7 @@ class UserPublicSerializer(serializers.ModelSerializer):
             "consumer_pump",
             "pump_name",
             "vendor_id",
+            "vendor_name",
         ]
 
     def get_full_name(self, obj):
@@ -59,8 +62,16 @@ class UserPublicSerializer(serializers.ModelSerializer):
         return obj.consumer_pump.name if obj.consumer_pump else ""
 
     def get_vendor_id(self, obj):
-        profile = getattr(obj, "vendor_profile", None)
-        return profile.id if profile else None
+        try:
+            return obj.vendor_profile.id
+        except Vendor.DoesNotExist:
+            return None
+
+    def get_vendor_name(self, obj):
+        try:
+            return obj.vendor_profile.name
+        except Vendor.DoesNotExist:
+            return ""
 
 
 class LoginSerializer(serializers.Serializer):
@@ -141,6 +152,7 @@ class ConsumerPumpSerializer(serializers.ModelSerializer):
 
 class VendorSerializer(serializers.ModelSerializer):
     specialization_label = serializers.CharField(source="get_specialization_display", read_only=True)
+    username = serializers.SerializerMethodField()
     active_jobs = serializers.SerializerMethodField()
     resolved_jobs = serializers.SerializerMethodField()
     sla_compliance = serializers.SerializerMethodField()
@@ -154,12 +166,16 @@ class VendorSerializer(serializers.ModelSerializer):
             "specialization_label",
             "phone",
             "email",
+            "username",
             "rating",
             "is_active",
             "active_jobs",
             "resolved_jobs",
             "sla_compliance",
         ]
+
+    def get_username(self, obj):
+        return obj.user.username if obj.user else ""
 
     def get_active_jobs(self, obj):
         return obj.complaints.exclude(status=Complaint.Status.CLOSED).count()
@@ -331,3 +347,49 @@ class ComplaintSerializer(serializers.ModelSerializer):
             except ValueError:
                 seq = Complaint.objects.count() + 1
         return f"{prefix}{seq:03d}"
+
+
+class RegistrationCreateSerializer(serializers.Serializer):
+    kind = serializers.ChoiceField(choices=["CP_USER", "VENDOR"])
+    username = serializers.CharField(max_length=150)
+    password = serializers.CharField(min_length=8, write_only=True)
+    first_name = serializers.CharField(max_length=80)
+    last_name = serializers.CharField(max_length=80, required=False, allow_blank=True)
+    email = serializers.EmailField()
+    phone = serializers.CharField(max_length=20)
+    organization_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    specialization = serializers.CharField(max_length=32, required=False, allow_blank=True)
+    consumer_pump = serializers.IntegerField(required=False, allow_null=True)
+
+
+class RegistrationRequestSerializer(serializers.ModelSerializer):
+    kind_label = serializers.CharField(source="get_kind_display", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    pump_name = serializers.CharField(source="consumer_pump.name", read_only=True)
+    reviewed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RegistrationRequest
+        fields = [
+            "id",
+            "kind",
+            "kind_label",
+            "status",
+            "status_label",
+            "username",
+            "first_name",
+            "last_name",
+            "email",
+            "phone",
+            "organization_name",
+            "specialization",
+            "consumer_pump",
+            "pump_name",
+            "admin_note",
+            "created_at",
+            "reviewed_at",
+            "reviewed_by_name",
+        ]
+
+    def get_reviewed_by_name(self, obj):
+        return obj.reviewed_by.get_full_name() if obj.reviewed_by else ""

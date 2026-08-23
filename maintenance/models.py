@@ -192,3 +192,43 @@ class StatusHistory(models.Model):
 
     class Meta:
         ordering = ["created_at"]
+
+
+class RegistrationRequest(models.Model):
+    class Kind(models.TextChoices):
+        CP_USER = "CP_USER", "Consumer Pump User"
+        VENDOR = "VENDOR", "Vendor / Technician"
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending approval"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    username = models.CharField(max_length=150)
+    password_hash = models.CharField(max_length=128)
+    first_name = models.CharField(max_length=80)
+    last_name = models.CharField(max_length=80, blank=True)
+    email = models.EmailField()
+    phone = models.CharField(max_length=20)
+    organization_name = models.CharField(max_length=200, blank=True)
+    specialization = models.CharField(max_length=32, blank=True)
+    consumer_pump = models.ForeignKey(
+        ConsumerPump, null=True, blank=True, on_delete=models.SET_NULL, related_name="registration_requests"
+    )
+    admin_note = models.CharField(max_length=255, blank=True)
+    created_user = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name="approved_from_registration"
+    )
+    reviewed_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name="reviewed_registrations"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.username} ({self.kind}) {self.status}"

@@ -1,6 +1,7 @@
 import csv
 from io import StringIO
 
+from django.contrib.auth.hashers import make_password
 from django.db.models import Avg, Count, Q
 from django.http import HttpResponse
 from django.utils import timezone
@@ -18,17 +19,20 @@ from .models import (
     ComplaintMedia,
     ConsumerPump,
     DivisionalOffice,
+    RegistrationRequest,
     SalesArea,
     StatusHistory,
     User,
     Vendor,
 )
-from .permissions import OFFICER_ROLES, IsOfficer
+from .permissions import OFFICER_ROLES, IsAdmin, IsOfficer
 from .serializers import (
     ComplaintSerializer,
     ConsumerPumpSerializer,
     DivisionalOfficeSerializer,
     LoginSerializer,
+    RegistrationCreateSerializer,
+    RegistrationRequestSerializer,
     SalesAreaSerializer,
     UserPublicSerializer,
     VendorSerializer,
@@ -113,6 +117,8 @@ def login_view(request):
         return Response({"detail": "Invalid username or password."}, status=400)
     if not user.check_password(serializer.validated_data["password"]):
         return Response({"detail": "Invalid username or password."}, status=400)
+    if not user.is_active:
+        return Response({"detail": "This account is inactive."}, status=400)
     refresh = RefreshToken.for_user(user)
     return Response(
         {
@@ -121,6 +127,129 @@ def login_view(request):
             "user": UserPublicSerializer(user).data,
         }
     )
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def register_options_view(request):
+    pumps = ConsumerPump.objects.filter(is_active=True).order_by("name")
+    return Response(
+        {
+            "pumps": [
+                {"id": p.id, "pump_code": p.pump_code, "name": p.name, "city": p.city}
+                for p in pumps
+            ],
+            "specializations": [
+                {"value": value, "label": label} for value, label in Vendor.Specialization.choices
+            ],
+        }
+    )
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def register_view(request):
+    serializer = RegistrationCreateSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    username = data["username"].strip()
+    if User.objects.filter(username__iexact=username).exists():
+        return Response({"detail": "This username is already taken."}, status=400)
+    if RegistrationRequest.objects.filter(
+        username__iexact=username, status=RegistrationRequest.Status.PENDING
+    ).exists():
+        return Response({"detail": "A registration with this username is already pending approval."}, status=400)
+    if data["kind"] == RegistrationRequest.Kind.VENDOR and not data.get("organization_name"):
+        return Response({"detail": "Vendor company name is required."}, status=400)
+    if data["kind"] == RegistrationRequest.Kind.CP_USER and not data.get("consumer_pump"):
+        return Response({"detail": "Please select a Consumer Pump."}, status=400)
+    pump = None
+    if data.get("consumer_pump"):
+        pump = ConsumerPump.objects.filter(pk=data["consumer_pump"]).first()
+        if not pump:
+            return Response({"detail": "Invalid Consumer Pump."}, status=400)
+    spec = (data.get("specialization") or "").upper()
+    if data["kind"] == RegistrationRequest.Kind.VENDOR and spec not in Vendor.Specialization.values:
+        spec = Vendor.Specialization.OTHER
+    rec = RegistrationRequest.objects.create(
+        kind=data["kind"],
+        username=username,
+        password_hash=make_password(data["password"]),
+        first_name=data["first_name"].strip(),
+        last_name=(data.get("last_name") or "").strip(),
+        email=data["email"].strip(),
+        phone=data["phone"].strip(),
+        organization_name=(data.get("organization_name") or "").strip(),
+        specialization=spec if data["kind"] == RegistrationRequest.Kind.VENDOR else "",
+        consumer_pump=pump if data["kind"] == RegistrationRequest.Kind.CP_USER else None,
+    )
+    return Response(RegistrationRequestSerializer(rec).data, status=201)
+
+
+@api_view(["GET"])
+def users_directory_view(request):
+    if request.user.role not in OFFICER_ROLES:
+        return Response({"detail": "Only officers can view the user directory."}, status=403)
+    qs = (
+        User.objects.filter(role__in=[User.Role.CP_USER, User.Role.VENDOR], is_active=True)
+        .select_related("consumer_pump", "sales_area", "sales_area__divisional_office", "divisional_office", "vendor_profile")
+        .order_by("role", "first_name", "username")
+    )
+    return Response(UserPublicSerializer(qs, many=True).data)
+
+
+class RegistrationViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = RegistrationRequestSerializer
+    permission_classes = [IsAuthenticated, IsAdmin]
+    queryset = RegistrationRequest.objects.select_related("consumer_pump", "reviewed_by")
+
+    @action(detail=True, methods=["post"])
+    def approve(self, request, pk=None):
+        rec = self.get_object()
+        if rec.status != RegistrationRequest.Status.PENDING:
+            return Response({"detail": "This request has already been reviewed."}, status=400)
+        if User.objects.filter(username__iexact=rec.username).exists():
+            return Response({"detail": "Username is already in use."}, status=400)
+        user = User(
+            username=rec.username,
+            first_name=rec.first_name,
+            last_name=rec.last_name,
+            email=rec.email,
+            phone=rec.phone,
+            role=User.Role.VENDOR if rec.kind == RegistrationRequest.Kind.VENDOR else User.Role.CP_USER,
+        )
+        user.password = rec.password_hash
+        if rec.kind == RegistrationRequest.Kind.CP_USER and rec.consumer_pump:
+            user.consumer_pump = rec.consumer_pump
+            user.sales_area = rec.consumer_pump.sales_area
+        user.save()
+        if rec.kind == RegistrationRequest.Kind.VENDOR:
+            Vendor.objects.create(
+                name=rec.organization_name or f"{rec.first_name} {rec.last_name}".strip() or rec.username,
+                specialization=rec.specialization or Vendor.Specialization.OTHER,
+                phone=rec.phone,
+                email=rec.email,
+                user=user,
+            )
+        rec.status = RegistrationRequest.Status.APPROVED
+        rec.created_user = user
+        rec.reviewed_by = request.user
+        rec.reviewed_at = timezone.now()
+        rec.admin_note = request.data.get("admin_note", rec.admin_note)
+        rec.save()
+        return Response(RegistrationRequestSerializer(rec).data)
+
+    @action(detail=True, methods=["post"])
+    def reject(self, request, pk=None):
+        rec = self.get_object()
+        if rec.status != RegistrationRequest.Status.PENDING:
+            return Response({"detail": "This request has already been reviewed."}, status=400)
+        rec.status = RegistrationRequest.Status.REJECTED
+        rec.reviewed_by = request.user
+        rec.reviewed_at = timezone.now()
+        rec.admin_note = request.data.get("admin_note", "Rejected")
+        rec.save()
+        return Response(RegistrationRequestSerializer(rec).data)
 
 
 @api_view(["GET"])
@@ -224,6 +353,11 @@ def dashboard_view(request):
             "aging_buckets": aging_buckets,
             "area_pendency": area_pendency,
             "priority_items": ComplaintSerializer(priority, many=True, context={"request": request}).data,
+            "pending_registrations": (
+                RegistrationRequest.objects.filter(status=RegistrationRequest.Status.PENDING).count()
+                if request.user.role == User.Role.ADMIN
+                else 0
+            ),
         }
     )
 
@@ -245,7 +379,7 @@ class VendorViewSet(viewsets.ModelViewSet):
     serializer_class = VendorSerializer
     permission_classes = [IsAuthenticated]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
-    queryset = Vendor.objects.all()
+    queryset = Vendor.objects.select_related("user")
 
     def get_permissions(self):
         if self.action in ("create", "update", "partial_update", "destroy", "bulk_upload"):

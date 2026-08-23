@@ -11,6 +11,7 @@ from .models import (
     StatusHistory,
     User,
     Vendor,
+    RegistrationRequest,
 )
 
 
@@ -29,3 +30,4 @@ admin.site.register(Complaint)
 admin.site.register(ComplaintMedia)
 admin.site.register(ComplaintFeedback)
 admin.site.register(StatusHistory)
+admin.site.register(RegistrationRequest)
