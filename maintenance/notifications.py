@@ -1,7 +1,11 @@
+import json
 import logging
+import sys
+import threading
+import urllib.error
+import urllib.request
 
 from django.conf import settings
-from django.core.mail import send_mail
 
 from .models import Complaint, Notification, RegistrationRequest, User
 
@@ -37,27 +41,61 @@ def _can_email(user):
     return not any(lowered.endswith(suffix) for suffix in _SKIP_EMAIL_SUFFIXES)
 
 
-def _send_emails(recipients, title, body, link=""):
+def _email_suppressed():
     if not getattr(settings, "EMAIL_HOST_PASSWORD", ""):
+        return True
+    if "seed" in sys.argv:
+        return True
+    return False
+
+
+def _deliver_emails(payload):
+    """HTTPS to Resend in a background thread. SMTP port 465 hangs on Render."""
+    api_key = settings.EMAIL_HOST_PASSWORD
+    from_email = settings.DEFAULT_FROM_EMAIL
+    timeout = getattr(settings, "EMAIL_TIMEOUT", 8)
+    for subject, body, to_addr in payload:
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=json.dumps(
+                {
+                    "from": from_email,
+                    "to": [to_addr],
+                    "subject": subject,
+                    "text": body,
+                }
+            ).encode(),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                resp.read()
+        except urllib.error.HTTPError as exc:
+            logger.warning("Resend rejected mail to %s (%s)", to_addr, exc.code)
+        except Exception:
+            logger.exception("Resend send failed for %s", to_addr)
+
+
+def _send_emails(recipients, title, body, link=""):
+    if _email_suppressed():
         return
     base = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
     url = f"{base}{link}" if link and base else base
     text = body.strip()
     if url:
         text = f"{text}\n\nOpen in PAHLE-APP: {url}".strip()
+    payload = []
     for user in recipients:
         if not _can_email(user):
             continue
-        try:
-            send_mail(
-                subject=f"PAHLE-APP: {title}",
-                message=text or title,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email.strip()],
-                fail_silently=True,
-            )
-        except Exception:
-            logger.exception("Email send failed for %s", user.email)
+        payload.append((f"PAHLE-APP: {title}", text or title, user.email.strip()))
+    if not payload:
+        return
+    threading.Thread(target=_deliver_emails, args=(payload,), daemon=True).start()
 
 
 def notify(users, *, kind, title, body="", link="", complaint=None, registration=None, exclude=None):
