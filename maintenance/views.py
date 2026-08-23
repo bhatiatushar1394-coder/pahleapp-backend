@@ -25,8 +25,16 @@ from .models import (
     StatusHistory,
     User,
     Vendor,
+    VendorSiteIssue,
 )
-from .notifications import notify_new_complaint, notify_registration, notify_registration_decision, notify_transition
+from .notifications import (
+    notify_escalation,
+    notify_new_complaint,
+    notify_registration,
+    notify_registration_decision,
+    notify_site_issue,
+    notify_transition,
+)
 from .permissions import OFFICER_ROLES, IsAdmin, IsOfficer
 from .serializers import (
     ComplaintSerializer,
@@ -48,11 +56,12 @@ def scoped_complaints(user):
         "pump",
         "pump__sales_area",
         "pump__sales_area__divisional_office",
+        "pump__engineering_officer",
         "sales_officer",
         "assigned_vendor",
         "submitted_by",
         "feedback",
-    ).prefetch_related("media", "history", "pump__facilities")
+    ).prefetch_related("media", "history", "pump__facilities", "site_issues", "site_issues__reported_by")
     if user.role == User.Role.ADMIN:
         return qs
     if user.role == User.Role.DO_OFFICER and user.divisional_office_id:
@@ -284,6 +293,9 @@ def meta_view(request):
             "sales_areas": SalesAreaSerializer(SalesArea.objects.select_related("divisional_office"), many=True).data,
             "divisional_offices": DivisionalOfficeSerializer(DivisionalOffice.objects.all(), many=True).data,
             "officers": UserPublicSerializer(officers, many=True, context={"request": request}).data,
+            "site_issue_kinds": [
+                {"value": value, "label": label} for value, label in VendorSiteIssue.Kind.choices
+            ],
         }
     )
 
@@ -332,11 +344,17 @@ def dashboard_view(request):
             }
         )
 
-    priority = active.filter(
-        Q(assigned_vendor__isnull=True)
-        | Q(status__in=[Complaint.Status.WORK_COMPLETION, Complaint.Status.USER_CONFIRMATION])
-        | Q(status=Complaint.Status.SUBMITTED)
-    ).order_by("created_at")
+    priority = (
+        active.filter(
+            Q(assigned_vendor__isnull=True)
+            | Q(status__in=[Complaint.Status.WORK_COMPLETION, Complaint.Status.USER_CONFIRMATION])
+            | Q(status=Complaint.Status.SUBMITTED)
+            | Q(escalation_count__gt=0)
+            | Q(site_issues__isnull=False)
+        )
+        .distinct()
+        .order_by("-escalation_count", "created_at")
+    )
 
     sla_closed = list(closed)
     sla_met = 100.0
@@ -464,6 +482,10 @@ class ComplaintViewSet(viewsets.ModelViewSet):
             )
         elif bucket == "unassigned":
             qs = qs.filter(assigned_vendor__isnull=True).exclude(status=Complaint.Status.CLOSED)
+        elif bucket == "escalated":
+            qs = qs.filter(escalation_count__gt=0).exclude(status=Complaint.Status.CLOSED)
+        elif bucket == "site_issues":
+            qs = qs.filter(site_issues__isnull=False).exclude(status=Complaint.Status.CLOSED).distinct()
         if params.get("category"):
             qs = qs.filter(category=params["category"])
         if params.get("sales_area"):
@@ -602,6 +624,76 @@ class ComplaintViewSet(viewsets.ModelViewSet):
                     vendor.save(update_fields=["rating"])
         else:
             transition(complaint, Complaint.Status.WORK_IN_PROGRESS, request.user, "Re-work requested")
+        return Response(self.get_serializer(complaint).data)
+
+    @action(detail=True, methods=["post"])
+    def escalate(self, request, pk=None):
+        complaint = self.get_object()
+        if complaint.status == Complaint.Status.CLOSED:
+            return Response({"detail": "Closed complaints cannot be escalated."}, status=400)
+        if request.user.role != User.Role.CP_USER:
+            return Response({"detail": "Only the pump user can escalate this complaint."}, status=403)
+        if not (
+            complaint.submitted_by_id == request.user.id
+            or complaint.pump_id == request.user.consumer_pump_id
+        ):
+            return Response({"detail": "You can only escalate complaints for your pump."}, status=403)
+        note = (request.data.get("note") or "").strip()
+        if len(note) < 8:
+            return Response({"detail": "Please describe why this needs escalation (at least 8 characters)."}, status=400)
+        complaint.priority = Complaint.Priority.HIGH
+        complaint.escalated_at = timezone.now()
+        complaint.escalation_note = note
+        complaint.escalation_count = (complaint.escalation_count or 0) + 1
+        complaint.save(
+            update_fields=["priority", "escalated_at", "escalation_note", "escalation_count", "updated_at"]
+        )
+        StatusHistory.objects.create(
+            complaint=complaint,
+            from_status=complaint.status,
+            to_status=complaint.status,
+            actor=request.user,
+            note=f"User escalated (#{complaint.escalation_count}): {note[:200]}",
+        )
+        notify_escalation(complaint, request.user, note)
+        return Response(self.get_serializer(complaint).data)
+
+    @action(detail=True, methods=["post"], url_path="site-issue")
+    def site_issue(self, request, pk=None):
+        complaint = self.get_object()
+        if request.user.role != User.Role.VENDOR:
+            return Response({"detail": "Only the assigned vendor can report a site problem."}, status=403)
+        profile = getattr(request.user, "vendor_profile", None)
+        if not profile or complaint.assigned_vendor_id != profile.id:
+            return Response({"detail": "This job is not assigned to you."}, status=403)
+        if complaint.status == Complaint.Status.CLOSED:
+            return Response({"detail": "Closed jobs cannot take a site report."}, status=400)
+        kind = (request.data.get("kind") or "").strip().upper()
+        if kind not in VendorSiteIssue.Kind.values:
+            return Response({"detail": "Select a valid site problem type."}, status=400)
+        description = (request.data.get("description") or "").strip()
+        if len(description) < 8:
+            return Response({"detail": "Please describe the problem at site (at least 8 characters)."}, status=400)
+        issue = VendorSiteIssue.objects.create(
+            complaint=complaint,
+            reported_by=request.user,
+            kind=kind,
+            description=description,
+        )
+        photo = request.FILES.get("photo")
+        if photo:
+            issue.photo = photo
+            issue.save(update_fields=["photo"])
+        complaint.priority = Complaint.Priority.HIGH
+        complaint.save(update_fields=["priority", "updated_at"])
+        StatusHistory.objects.create(
+            complaint=complaint,
+            from_status=complaint.status,
+            to_status=complaint.status,
+            actor=request.user,
+            note=f"Vendor site issue ({issue.get_kind_display()}): {description[:180]}",
+        )
+        notify_site_issue(issue)
         return Response(self.get_serializer(complaint).data)
 
 

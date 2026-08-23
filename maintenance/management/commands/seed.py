@@ -8,7 +8,13 @@ from django.utils import timezone
 from PIL import Image, ImageDraw, ImageFont
 
 from maintenance.constants import SLA_HOURS
-from maintenance.notifications import notify_new_complaint, notify_registration, notify_transition
+from maintenance.notifications import (
+    notify_escalation,
+    notify_new_complaint,
+    notify_registration,
+    notify_site_issue,
+    notify_transition,
+)
 from maintenance.models import (
     Complaint,
     ComplaintFeedback,
@@ -22,6 +28,7 @@ from maintenance.models import (
     User,
     Vendor,
     Notification,
+    VendorSiteIssue,
 )
 
 PASSWORD = "Pahle@123"
@@ -271,6 +278,38 @@ class Command(BaseCommand):
             ],
             priya,
         )
+        c2.escalated_at = now - timedelta(hours=4)
+        c2.escalation_note = (
+            "Vendor has been on site but fuel odor is still strong. Please treat this as urgent."
+        )
+        c2.escalation_count = 1
+        c2.save(update_fields=["escalated_at", "escalation_note", "escalation_count"])
+        StatusHistory.objects.create(
+            complaint=c2,
+            from_status=Complaint.Status.WORK_IN_PROGRESS,
+            to_status=Complaint.Status.WORK_IN_PROGRESS,
+            actor=national_user,
+            note="User escalated (#1): Vendor has been on site but fuel odor is still strong.",
+            created_at=now - timedelta(hours=4),
+        )
+        notify_escalation(c2, national_user, c2.escalation_note)
+        issue = VendorSiteIssue.objects.create(
+            complaint=c2,
+            reported_by=hydro_user,
+            kind=VendorSiteIssue.Kind.PARTS,
+            description="Required nitrile manhole seals are not in local stock. Need approval to source from Mumbai warehouse.",
+        )
+        issue.created_at = now - timedelta(hours=6)
+        issue.save(update_fields=["created_at"])
+        StatusHistory.objects.create(
+            complaint=c2,
+            from_status=Complaint.Status.WORK_IN_PROGRESS,
+            to_status=Complaint.Status.WORK_IN_PROGRESS,
+            actor=hydro_user,
+            note="Vendor site issue (Parts / material not available): Required nitrile manhole seals are not in local stock.",
+            created_at=now - timedelta(hours=6),
+        )
+        notify_site_issue(issue)
 
         c3 = Complaint.objects.create(
             complaint_id="CMP-2026-003",

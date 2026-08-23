@@ -14,6 +14,7 @@ from .models import (
     User,
     Vendor,
     Notification,
+    VendorSiteIssue,
 )
 
 
@@ -271,6 +272,37 @@ class StatusHistorySerializer(serializers.ModelSerializer):
         return obj.actor.get_full_name() if obj.actor else ""
 
 
+class VendorSiteIssueSerializer(serializers.ModelSerializer):
+    kind_label = serializers.CharField(source="get_kind_display", read_only=True)
+    reported_by_name = serializers.SerializerMethodField()
+    photo_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VendorSiteIssue
+        fields = [
+            "id",
+            "kind",
+            "kind_label",
+            "description",
+            "photo_url",
+            "reported_by_name",
+            "created_at",
+        ]
+
+    def get_reported_by_name(self, obj):
+        if not obj.reported_by:
+            return ""
+        return obj.reported_by.get_full_name() or obj.reported_by.username
+
+    def get_photo_url(self, obj):
+        if not obj.photo:
+            return None
+        request = self.context.get("request")
+        if request:
+            return request.build_absolute_uri(obj.photo.url)
+        return obj.photo.url
+
+
 class ComplaintSerializer(serializers.ModelSerializer):
     pump_name = serializers.CharField(source="pump.name", read_only=True)
     pump_code = serializers.CharField(source="pump.pump_code", read_only=True)
@@ -286,6 +318,7 @@ class ComplaintSerializer(serializers.ModelSerializer):
     media = ComplaintMediaSerializer(many=True, read_only=True)
     feedback = ComplaintFeedbackSerializer(read_only=True)
     history = StatusHistorySerializer(many=True, read_only=True)
+    site_issues = VendorSiteIssueSerializer(many=True, read_only=True)
     user_rating = serializers.SerializerMethodField()
 
     class Meta:
@@ -316,12 +349,16 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "sla_hours",
             "aging_hours",
             "is_overdue",
+            "escalated_at",
+            "escalation_note",
+            "escalation_count",
             "created_at",
             "updated_at",
             "closed_at",
             "media",
             "feedback",
             "history",
+            "site_issues",
             "user_rating",
         ]
         read_only_fields = [
@@ -331,6 +368,9 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "status",
             "sla_hours",
             "closed_at",
+            "escalated_at",
+            "escalation_note",
+            "escalation_count",
         ]
 
     def get_sales_area_label(self, obj):

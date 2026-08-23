@@ -143,6 +143,9 @@ class Complaint(models.Model):
     vendor_remarks = models.TextField(blank=True)
     sla_hours = models.PositiveIntegerField(default=48)
     last_reminded_at = models.DateTimeField(null=True, blank=True)
+    escalated_at = models.DateTimeField(null=True, blank=True)
+    escalation_note = models.TextField(blank=True)
+    escalation_count = models.PositiveSmallIntegerField(default=0)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     closed_at = models.DateTimeField(null=True, blank=True)
@@ -184,6 +187,29 @@ class ComplaintFeedback(models.Model):
     remarks = models.TextField(blank=True)
     submitted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     submitted_at = models.DateTimeField(auto_now_add=True)
+
+
+class VendorSiteIssue(models.Model):
+    class Kind(models.TextChoices):
+        ACCESS = "ACCESS", "Site access / permission blocked"
+        SAFETY = "SAFETY", "Safety or shutdown risk"
+        PARTS = "PARTS", "Parts / material not available"
+        EXTRA_WORK = "EXTRA_WORK", "Additional damage found on site"
+        CUSTOMER_UNAVAILABLE = "CUSTOMER_UNAVAILABLE", "Customer / site contact unavailable"
+        OTHER = "OTHER", "Other site problem"
+
+    complaint = models.ForeignKey(Complaint, on_delete=models.CASCADE, related_name="site_issues")
+    reported_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="site_issues")
+    kind = models.CharField(max_length=32, choices=Kind.choices)
+    description = models.TextField()
+    photo = models.ImageField(upload_to="site_issues/%Y/%m/", blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.complaint.complaint_id}: {self.get_kind_display()}"
 
 
 class StatusHistory(models.Model):
@@ -245,6 +271,8 @@ class Notification(models.Model):
         VENDOR_ASSIGNED = "VENDOR_ASSIGNED", "Assigned to vendor"
         STATUS = "STATUS", "Status update"
         REGISTRATION = "REGISTRATION", "Registration"
+        ESCALATION = "ESCALATION", "User escalation"
+        SITE_ISSUE = "SITE_ISSUE", "Vendor site issue"
 
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
     kind = models.CharField(max_length=32, choices=Kind.choices)

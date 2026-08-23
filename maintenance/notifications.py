@@ -58,6 +58,53 @@ def complaint_link(complaint):
     return f"/complaints?q={complaint.complaint_id}"
 
 
+def complaint_officers(complaint):
+    users = [*admins(), complaint.sales_officer]
+    pump = getattr(complaint, "pump", None)
+    if pump and getattr(pump, "engineering_officer", None):
+        users.append(pump.engineering_officer)
+    return users
+
+
+def notify_escalation(complaint, actor, note):
+    cid = complaint.complaint_id
+    notify(
+        complaint_officers(complaint),
+        kind=Notification.Kind.ESCALATION,
+        title=f"{cid} escalated by the pump user",
+        body=note[:400] or f"{complaint.pump.name}: user asked for faster action.",
+        link=complaint_link(complaint),
+        complaint=complaint,
+        exclude=actor,
+    )
+    vendor_user = vendor_login(complaint)
+    if vendor_user:
+        notify(
+            [vendor_user],
+            kind=Notification.Kind.ESCALATION,
+            title=f"{cid} was escalated by the customer",
+            body="Please treat this job as high priority.",
+            link=complaint_link(complaint),
+            complaint=complaint,
+            exclude=actor,
+        )
+
+
+def notify_site_issue(issue):
+    complaint = issue.complaint
+    cid = complaint.complaint_id
+    kind = issue.get_kind_display()
+    notify(
+        [*complaint_officers(complaint), *cp_watchers(complaint)],
+        kind=Notification.Kind.SITE_ISSUE,
+        title=f"{cid}: vendor reported a site problem",
+        body=f"{kind}. {issue.description}"[:400],
+        link=complaint_link(complaint),
+        complaint=complaint,
+        exclude=issue.reported_by,
+    )
+
+
 def notify_new_complaint(complaint):
     title = f"New complaint {complaint.complaint_id}"
     body = f"{complaint.pump.name}: {complaint.specific_problem}. Assign a vendor."
