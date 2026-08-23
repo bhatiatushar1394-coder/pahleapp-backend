@@ -6,7 +6,7 @@ from django.db.models import Avg, Count, Q
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status, viewsets
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.decorators import action, api_view, parser_classes, permission_classes
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -34,6 +34,7 @@ from .serializers import (
     RegistrationCreateSerializer,
     RegistrationRequestSerializer,
     SalesAreaSerializer,
+    UserProfileUpdateSerializer,
     UserPublicSerializer,
     VendorSerializer,
 )
@@ -124,7 +125,7 @@ def login_view(request):
         {
             "access": str(refresh.access_token),
             "refresh": str(refresh),
-            "user": UserPublicSerializer(user).data,
+            "user": UserPublicSerializer(user, context={"request": request}).data,
         }
     )
 
@@ -195,7 +196,7 @@ def users_directory_view(request):
         .select_related("consumer_pump", "sales_area", "sales_area__divisional_office", "divisional_office", "vendor_profile")
         .order_by("role", "first_name", "username")
     )
-    return Response(UserPublicSerializer(qs, many=True).data)
+    return Response(UserPublicSerializer(qs, many=True, context={"request": request}).data)
 
 
 class RegistrationViewSet(viewsets.ReadOnlyModelViewSet):
@@ -252,9 +253,16 @@ class RegistrationViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(RegistrationRequestSerializer(rec).data)
 
 
-@api_view(["GET"])
+@api_view(["GET", "PATCH", "PUT"])
+@parser_classes([JSONParser, MultiPartParser, FormParser])
 def me_view(request):
-    return Response(UserPublicSerializer(request.user).data)
+    if request.method == "GET":
+        return Response(UserPublicSerializer(request.user, context={"request": request}).data)
+    serializer = UserProfileUpdateSerializer(request.user, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    request.user.refresh_from_db()
+    return Response(UserPublicSerializer(request.user, context={"request": request}).data)
 
 
 @api_view(["GET"])
@@ -267,7 +275,7 @@ def meta_view(request):
             "status_flow": STATUS_FLOW,
             "sales_areas": SalesAreaSerializer(SalesArea.objects.select_related("divisional_office"), many=True).data,
             "divisional_offices": DivisionalOfficeSerializer(DivisionalOffice.objects.all(), many=True).data,
-            "officers": UserPublicSerializer(officers, many=True).data,
+            "officers": UserPublicSerializer(officers, many=True, context={"request": request}).data,
         }
     )
 

@@ -17,7 +17,7 @@ from .models import (
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ("username", "email", "role", "sales_area", "is_active")
+    list_display = ("username", "email", "role", "phone", "sales_area", "is_active")
     list_filter = ("role",)
 
 

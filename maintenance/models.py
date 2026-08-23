@@ -23,6 +23,10 @@ class User(AbstractUser):
     consumer_pump = models.ForeignKey(
         "ConsumerPump", null=True, blank=True, on_delete=models.SET_NULL, related_name="portal_users"
     )
+    designation = models.CharField(max_length=120, blank=True)
+    employee_code = models.CharField(max_length=40, blank=True)
+    bio = models.TextField(blank=True)
+    avatar = models.ImageField(upload_to="avatars/%Y/%m/", blank=True)
 
     def __str__(self):
         return f"{self.get_full_name() or self.username} ({self.get_role_display()})"

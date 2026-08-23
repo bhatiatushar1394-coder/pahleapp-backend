@@ -24,6 +24,7 @@ class UserPublicSerializer(serializers.ModelSerializer):
     pump_name = serializers.SerializerMethodField()
     vendor_id = serializers.SerializerMethodField()
     vendor_name = serializers.SerializerMethodField()
+    avatar_url = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -45,6 +46,10 @@ class UserPublicSerializer(serializers.ModelSerializer):
             "pump_name",
             "vendor_id",
             "vendor_name",
+            "designation",
+            "employee_code",
+            "bio",
+            "avatar_url",
         ]
 
     def get_full_name(self, obj):
@@ -72,6 +77,48 @@ class UserPublicSerializer(serializers.ModelSerializer):
             return obj.vendor_profile.name
         except Vendor.DoesNotExist:
             return ""
+
+    def get_avatar_url(self, obj):
+        if not obj.avatar:
+            return None
+        request = self.context.get("request")
+        if request:
+            return request.build_absolute_uri(obj.avatar.url)
+        return obj.avatar.url
+
+
+class UserProfileUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = [
+            "first_name",
+            "last_name",
+            "email",
+            "phone",
+            "designation",
+            "employee_code",
+            "bio",
+            "avatar",
+        ]
+
+    def update(self, instance, validated_data):
+        avatar = validated_data.pop("avatar", None)
+        for key, value in validated_data.items():
+            setattr(instance, key, value)
+        if avatar is not None:
+            instance.avatar = avatar
+        instance.save()
+        try:
+            vendor = instance.vendor_profile
+        except Vendor.DoesNotExist:
+            vendor = None
+        if vendor:
+            if "phone" in validated_data:
+                vendor.phone = instance.phone
+            if "email" in validated_data:
+                vendor.email = instance.email
+            vendor.save(update_fields=["phone", "email"])
+        return instance
 
 
 class LoginSerializer(serializers.Serializer):
