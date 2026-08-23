@@ -315,6 +315,7 @@ class ComplaintSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     aging_hours = serializers.IntegerField(read_only=True)
     is_overdue = serializers.BooleanField(read_only=True)
+    estimation_reviewed_by_name = serializers.SerializerMethodField()
     media = ComplaintMediaSerializer(many=True, read_only=True)
     feedback = ComplaintFeedbackSerializer(read_only=True)
     history = StatusHistorySerializer(many=True, read_only=True)
@@ -346,6 +347,11 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "status_label",
             "officer_remarks",
             "vendor_remarks",
+            "estimation_remarks",
+            "estimation_amount",
+            "estimation_reviewed_by_name",
+            "estimation_reviewed_at",
+            "estimation_review_note",
             "sla_hours",
             "aging_hours",
             "is_overdue",
@@ -371,6 +377,10 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "escalated_at",
             "escalation_note",
             "escalation_count",
+            "estimation_remarks",
+            "estimation_amount",
+            "estimation_reviewed_at",
+            "estimation_review_note",
         ]
 
     def get_sales_area_label(self, obj):
@@ -387,6 +397,12 @@ class ComplaintSerializer(serializers.ModelSerializer):
     def get_user_rating(self, obj):
         fb = getattr(obj, "feedback", None)
         return fb.rating if fb else None
+
+    def get_estimation_reviewed_by_name(self, obj):
+        user = obj.estimation_reviewed_by
+        if not user:
+            return None
+        return user.get_full_name() or user.username
 
     def create(self, validated_data):
         request = self.context["request"]

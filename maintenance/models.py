@@ -118,6 +118,8 @@ class Complaint(models.Model):
         ASSIGNED_TO_OFFICER = "ASSIGNED_TO_OFFICER", "Assigned to Officer"
         ASSIGNED_TO_VENDOR = "ASSIGNED_TO_VENDOR", "Assigned to Vendor"
         VENDOR_ACKNOWLEDGED = "VENDOR_ACKNOWLEDGED", "Vendor Acknowledged"
+        ESTIMATION_PENDING = "ESTIMATION_PENDING", "Estimation Pending Approval"
+        ESTIMATION_APPROVED = "ESTIMATION_APPROVED", "Estimation Approved"
         WORK_IN_PROGRESS = "WORK_IN_PROGRESS", "Work in Progress"
         WORK_COMPLETION = "WORK_COMPLETION", "Work Completion"
         USER_CONFIRMATION = "USER_CONFIRMATION", "User Confirmation"
@@ -141,6 +143,17 @@ class Complaint(models.Model):
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.SUBMITTED)
     officer_remarks = models.TextField(blank=True)
     vendor_remarks = models.TextField(blank=True)
+    estimation_remarks = models.TextField(blank=True)
+    estimation_amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    estimation_reviewed_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_estimations",
+    )
+    estimation_reviewed_at = models.DateTimeField(null=True, blank=True)
+    estimation_review_note = models.TextField(blank=True)
     sla_hours = models.PositiveIntegerField(default=48)
     last_reminded_at = models.DateTimeField(null=True, blank=True)
     escalated_at = models.DateTimeField(null=True, blank=True)

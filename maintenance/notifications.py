@@ -331,6 +331,26 @@ def notify_transition(complaint, actor, from_status, to_status):
             complaint=complaint,
             exclude=actor,
         )
+    elif to_status == Complaint.Status.ESTIMATION_APPROVED:
+        notify(
+            [vendor_user],
+            kind=Notification.Kind.STATUS,
+            title=f"Estimation approved for {cid}",
+            body="You can start work on site now.",
+            link=link,
+            complaint=complaint,
+            exclude=actor,
+        )
+    elif to_status == Complaint.Status.VENDOR_ACKNOWLEDGED and from_status == Complaint.Status.ESTIMATION_PENDING:
+        notify(
+            [vendor_user],
+            kind=Notification.Kind.STATUS,
+            title=f"Estimation sent back on {cid}",
+            body=complaint.estimation_review_note or "Please revise the estimation and submit again.",
+            link=link,
+            complaint=complaint,
+            exclude=actor,
+        )
     elif to_status == Complaint.Status.WORK_IN_PROGRESS and from_status in (
         Complaint.Status.WORK_COMPLETION,
         Complaint.Status.USER_CONFIRMATION,

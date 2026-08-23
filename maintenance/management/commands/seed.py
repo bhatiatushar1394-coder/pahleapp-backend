@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 from io import BytesIO
 
 from django.contrib.auth.hashers import make_password
@@ -329,8 +330,10 @@ class Command(BaseCommand):
             specific_problem="Kerb wall repair/Painting",
             description="Kerb wall chipped near island 1; painting and civil repair required.",
             priority=Complaint.Priority.MEDIUM,
-            status=Complaint.Status.ASSIGNED_TO_VENDOR,
+            status=Complaint.Status.ESTIMATION_PENDING,
             officer_remarks="Schedule civil crew this week.",
+            estimation_remarks="Kerb wall civil repair, primer, and two coats of paint including labour and material.",
+            estimation_amount=Decimal("18500.00"),
             sla_hours=SLA_HOURS["CIVIL"],
             created_at=now - timedelta(hours=10),
         )
@@ -340,10 +343,12 @@ class Command(BaseCommand):
                 (Complaint.Status.SUBMITTED, "Complaint lodged", now - timedelta(hours=10)),
                 (Complaint.Status.ASSIGNED_TO_OFFICER, "Auto-mapped to LKO-III", now - timedelta(hours=10)),
                 (Complaint.Status.ASSIGNED_TO_VENDOR, "Assigned LUV CONSTRUCTION", now - timedelta(hours=6)),
+                (Complaint.Status.VENDOR_ACKNOWLEDGED, "Vendor acknowledged", now - timedelta(hours=5)),
+                (Complaint.Status.ESTIMATION_PENDING, "Estimation submitted: ₹18500.00", now - timedelta(hours=4)),
             ],
             priya,
         )
-        notify_transition(c3, priya, Complaint.Status.ASSIGNED_TO_OFFICER, Complaint.Status.ASSIGNED_TO_VENDOR)
+        notify_transition(c3, build_user, Complaint.Status.VENDOR_ACKNOWLEDGED, Complaint.Status.ESTIMATION_PENDING)
 
         c4 = Complaint.objects.create(
             complaint_id="CMP-2026-004",

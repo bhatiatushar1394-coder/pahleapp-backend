@@ -1,4 +1,5 @@
 import csv
+from decimal import Decimal, InvalidOperation
 from io import StringIO
 
 from django.contrib.auth.hashers import make_password
@@ -309,6 +310,8 @@ def dashboard_view(request):
     in_progress = active.filter(
         status__in=[
             Complaint.Status.VENDOR_ACKNOWLEDGED,
+            Complaint.Status.ESTIMATION_PENDING,
+            Complaint.Status.ESTIMATION_APPROVED,
             Complaint.Status.WORK_IN_PROGRESS,
         ]
     )
@@ -470,6 +473,8 @@ class ComplaintViewSet(viewsets.ModelViewSet):
             qs = qs.filter(
                 status__in=[
                     Complaint.Status.VENDOR_ACKNOWLEDGED,
+                    Complaint.Status.ESTIMATION_PENDING,
+                    Complaint.Status.ESTIMATION_APPROVED,
                     Complaint.Status.WORK_IN_PROGRESS,
                 ]
             )
@@ -480,6 +485,8 @@ class ComplaintViewSet(viewsets.ModelViewSet):
                     Complaint.Status.USER_CONFIRMATION,
                 ]
             )
+        elif bucket == "estimation":
+            qs = qs.filter(status=Complaint.Status.ESTIMATION_PENDING)
         elif bucket == "unassigned":
             qs = qs.filter(assigned_vendor__isnull=True).exclude(status=Complaint.Status.CLOSED)
         elif bucket == "escalated":
@@ -554,11 +561,86 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         transition(complaint, Complaint.Status.VENDOR_ACKNOWLEDGED, request.user, "Vendor acknowledged")
         return Response(self.get_serializer(complaint).data)
 
+    @action(detail=True, methods=["post"], url_path="submit-estimation")
+    def submit_estimation(self, request, pk=None):
+        complaint = self.get_object()
+        if request.user.role != User.Role.VENDOR:
+            return Response({"detail": "Only the assigned vendor can submit an estimation."}, status=403)
+        if complaint.status not in (
+            Complaint.Status.ASSIGNED_TO_VENDOR,
+            Complaint.Status.VENDOR_ACKNOWLEDGED,
+        ):
+            return Response({"detail": "Estimation can be submitted after the job is assigned."}, status=400)
+        remarks = (request.data.get("estimation_remarks") or "").strip()
+        raw_amount = request.data.get("estimation_amount")
+        if not remarks or raw_amount in (None, ""):
+            return Response({"detail": "Estimation remarks and amount are required."}, status=400)
+        try:
+            amount = Decimal(str(raw_amount))
+        except (InvalidOperation, ValueError):
+            return Response({"detail": "Enter a valid estimation amount."}, status=400)
+        if amount <= 0:
+            return Response({"detail": "Estimation amount must be greater than zero."}, status=400)
+        complaint.estimation_remarks = remarks
+        complaint.estimation_amount = amount
+        complaint.estimation_reviewed_by = None
+        complaint.estimation_reviewed_at = None
+        complaint.estimation_review_note = ""
+        complaint.save()
+        transition(
+            complaint,
+            Complaint.Status.ESTIMATION_PENDING,
+            request.user,
+            f"Estimation submitted: ₹{amount}",
+        )
+        return Response(self.get_serializer(complaint).data)
+
+    @action(detail=True, methods=["post"], url_path="approve-estimation")
+    def approve_estimation(self, request, pk=None):
+        if request.user.role not in OFFICER_ROLES:
+            return Response({"detail": "Only an officer can approve an estimation."}, status=403)
+        complaint = self.get_object()
+        if complaint.status != Complaint.Status.ESTIMATION_PENDING:
+            return Response({"detail": "No estimation is waiting for approval."}, status=400)
+        complaint.estimation_reviewed_by = request.user
+        complaint.estimation_reviewed_at = timezone.now()
+        complaint.estimation_review_note = (request.data.get("note") or "").strip()
+        complaint.save()
+        transition(complaint, Complaint.Status.ESTIMATION_APPROVED, request.user, "Estimation approved")
+        return Response(self.get_serializer(complaint).data)
+
+    @action(detail=True, methods=["post"], url_path="reject-estimation")
+    def reject_estimation(self, request, pk=None):
+        if request.user.role not in OFFICER_ROLES:
+            return Response({"detail": "Only an officer can reject an estimation."}, status=403)
+        complaint = self.get_object()
+        if complaint.status != Complaint.Status.ESTIMATION_PENDING:
+            return Response({"detail": "No estimation is waiting for approval."}, status=400)
+        note = (request.data.get("note") or "").strip()
+        if not note:
+            return Response({"detail": "Please add a reason for sending the estimation back."}, status=400)
+        complaint.estimation_reviewed_by = request.user
+        complaint.estimation_reviewed_at = timezone.now()
+        complaint.estimation_review_note = note
+        complaint.save()
+        transition(
+            complaint,
+            Complaint.Status.VENDOR_ACKNOWLEDGED,
+            request.user,
+            f"Estimation sent back: {note}",
+        )
+        return Response(self.get_serializer(complaint).data)
+
     @action(detail=True, methods=["post"], url_path="start-work")
     def start_work(self, request, pk=None):
         complaint = self.get_object()
         if request.user.role != User.Role.VENDOR:
             return Response({"detail": "Only the assigned vendor can update work."}, status=403)
+        if complaint.status != Complaint.Status.ESTIMATION_APPROVED:
+            return Response(
+                {"detail": "Admin must approve the estimation before work can start."},
+                status=400,
+            )
         complaint.vendor_remarks = request.data.get("vendor_remarks", complaint.vendor_remarks)
         complaint.save()
         for f in request.FILES.getlist("photos") or request.FILES.getlist("photos[]"):
