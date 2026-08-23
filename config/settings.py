@@ -52,6 +52,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "maintenance.api_cache.ApiGetCacheMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -94,6 +95,18 @@ if _database_url:
 else:
     DATABASES = {"default": _sqlite}
 
+# Per-user API GET cache. LocMem is enough for a single Gunicorn worker on Render.
+# Set REDIS_URL later if you add Redis; until then do not use the DB as a cache.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "pahle-api",
+        "TIMEOUT": int(os.environ.get("API_CACHE_SECONDS", "60")),
+        "OPTIONS": {"MAX_ENTRIES": 800},
+    }
+}
+API_CACHE_SECONDS = int(os.environ.get("API_CACHE_SECONDS", "60"))
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
 ]
@@ -134,6 +147,7 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://.*\.vercel\.app$",
 ]
 CORS_ALLOW_CREDENTIALS = True
+CORS_PREFLIGHT_MAX_AGE = 86400
 CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS)
 if render_host:
     CSRF_TRUSTED_ORIGINS.append(f"https://{render_host}")

@@ -818,6 +818,10 @@ def reports_export(request):
         qs = qs.filter(category=request.GET["category"])
     if request.GET.get("sales_area"):
         qs = qs.filter(pump__sales_area_id=request.GET["sales_area"])
+    if request.GET.get("pump"):
+        qs = qs.filter(pump_id=request.GET["pump"])
+    if request.GET.get("vendor"):
+        qs = qs.filter(assigned_vendor_id=request.GET["vendor"])
     if request.GET.get("from"):
         qs = qs.filter(created_at__date__gte=request.GET["from"])
     if request.GET.get("to"):
