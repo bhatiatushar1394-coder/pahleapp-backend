@@ -74,12 +74,25 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
+_sqlite = {
+    "ENGINE": "django.db.backends.sqlite3",
+    "NAME": BASE_DIR / "db.sqlite3",
 }
+_database_url = os.environ.get("DATABASE_URL", "").strip()
+if _database_url:
+    import dj_database_url
+
+    DATABASES = {
+        "default": dj_database_url.parse(
+            _database_url,
+            conn_max_age=0,
+            conn_health_checks=True,
+            ssl_require=True,
+        )
+    }
+    DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
+else:
+    DATABASES = {"default": _sqlite}
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
