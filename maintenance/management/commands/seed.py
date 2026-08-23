@@ -87,14 +87,14 @@ class Command(BaseCommand):
         DivisionalOffice.objects.all().delete()
         User.objects.exclude(is_superuser=True).delete()
 
-        do_delhi = DivisionalOffice.objects.create(code="DO-DEL", name="DO Delhi")
-        do_mumbai = DivisionalOffice.objects.create(code="DO-MUM", name="DO Mumbai")
-        do_blr = DivisionalOffice.objects.create(code="DO-BLR", name="DO Bangalore")
+        do_lko = DivisionalOffice.objects.create(code="DO-LKO", name="DO Lucknow")
 
-        sa1 = SalesArea.objects.create(code="SA-1", name="North", zone="North Zone", divisional_office=do_delhi)
-        sa2 = SalesArea.objects.create(code="SA-2", name="West", zone="West Zone", divisional_office=do_mumbai)
-        sa3 = SalesArea.objects.create(code="SA-3", name="Metro", zone="South Zone", divisional_office=do_blr)
-        sa4 = SalesArea.objects.create(code="SA-4", name="South", zone="South Zone", divisional_office=do_blr)
+        sa1 = SalesArea.objects.create(
+            code="LKO-I", name="Lucknow I RSA", zone="Lucknow", divisional_office=do_lko
+        )
+        sa2 = SalesArea.objects.create(
+            code="LKO-III", name="Lucknow III RSA", zone="Lucknow", divisional_office=do_lko
+        )
 
         himanshu = user(
             "himanshu.saxena",
@@ -102,106 +102,114 @@ class Command(BaseCommand):
             "Saxena",
             User.Role.ADMIN,
             sales_area=sa1,
-            divisional_office=do_delhi,
+            divisional_office=do_lko,
             is_staff=True,
         )
-        priya = user("priya.verma", "Priya", "Verma", User.Role.SALES_OFFICER, sales_area=sa2, divisional_office=do_mumbai)
-        anil = user("anil.gupta", "Anil", "Gupta", User.Role.SALES_OFFICER, sales_area=sa3, divisional_office=do_blr)
-        raman = user("s.raman", "S.", "Raman", User.Role.SALES_OFFICER, sales_area=sa4, divisional_office=do_blr)
-        amit = user("amit.sharma", "Amit", "Sharma", User.Role.ENGINEERING_OFFICER, sales_area=sa1, divisional_office=do_delhi)
-        kulkarni = user("s.kulkarni", "S.", "Kulkarni", User.Role.ENGINEERING_OFFICER, sales_area=sa2, divisional_office=do_mumbai)
-        nair = user("v.nair", "V.", "Nair", User.Role.ENGINEERING_OFFICER, sales_area=sa3, divisional_office=do_blr)
-        reddiar = user("k.reddiar", "K.", "Reddiar", User.Role.ENGINEERING_OFFICER, sales_area=sa4, divisional_office=do_blr)
-        user("do.delhi", "Divisional", "Delhi", User.Role.DO_OFFICER, divisional_office=do_delhi)
-
-        p1 = ConsumerPump.objects.create(
-            pump_code="CP-101",
-            name="Metro Freight Logistics Pump",
-            address="Okhla Phase III, New Delhi",
-            city="New Delhi",
-            sales_area=sa1,
-            sales_officer=himanshu,
-            engineering_officer=amit,
-        )
-        p2 = ConsumerPump.objects.create(
-            pump_code="CP-102",
-            name="National Fleet Care Pump",
-            address="Andheri East, Mumbai",
-            city="Mumbai",
+        priya = user(
+            "priya.verma",
+            "Priya",
+            "Verma",
+            User.Role.SALES_OFFICER,
             sales_area=sa2,
-            sales_officer=priya,
-            engineering_officer=kulkarni,
+            divisional_office=do_lko,
         )
-        p3 = ConsumerPump.objects.create(
-            pump_code="CP-103",
-            name="TechPark Shuttle Services Pump",
-            address="Whitefield Main Rd, Bangalore",
-            city="Bangalore",
-            sales_area=sa3,
-            sales_officer=anil,
-            engineering_officer=nair,
+        anil = user(
+            "anil.gupta",
+            "Anil",
+            "Gupta",
+            User.Role.SALES_OFFICER,
+            sales_area=sa1,
+            divisional_office=do_lko,
         )
-        p4 = ConsumerPump.objects.create(
-            pump_code="CP-104",
-            name="Southern Cargo Hub Pump",
-            address="Hosur Road, Hosur",
-            city="Hosur",
-            sales_area=sa4,
-            sales_officer=raman,
-            engineering_officer=reddiar,
+        raman = priya
+        amit = user(
+            "amit.sharma",
+            "Amit",
+            "Sharma",
+            User.Role.ENGINEERING_OFFICER,
+            sales_area=sa1,
+            divisional_office=do_lko,
         )
+        kulkarni = user(
+            "s.kulkarni",
+            "S.",
+            "Kulkarni",
+            User.Role.ENGINEERING_OFFICER,
+            sales_area=sa2,
+            divisional_office=do_lko,
+        )
+        user("do.lucknow", "Divisional", "Lucknow", User.Role.DO_OFFICER, divisional_office=do_lko)
+
+        customers = [
+            ("CP-LKO-01", "Supply Depot Lucknow", "Lucknow Cantonement Lucknow 226005", "Lucknow", sa1, himanshu, amit),
+            ("CP-LKO-02", "TATA Motors Ltd", "Deva Road, Chinhat Industrial Area Chinhat, Lucknow, Uttar Pradesh 226019", "Lucknow", sa2, priya, kulkarni),
+            ("CP-LKO-03", "Aerolloy Technologies Limited", "F-1, Defence Industrial Corridor, Haruni Lucknow 226401", "Lucknow", sa2, priya, kulkarni),
+            ("CP-LKO-04", "EKANA SPORTZ CITY PVT. LTD.", "Saheed Path, Vill: Ardunamau, Gomti Nagar Extension, Sarojininagar, Lucknow 226010", "Lucknow", sa2, priya, kulkarni),
+            ("CP-LKO-05", "UPSRTC Qaiserbagh Lucknow", "Qaiserbagh Lucknow 261001", "Lucknow", sa1, himanshu, amit),
+        ]
+        pumps = []
+        for code, name, address, city, area, so, eo in customers:
+            pumps.append(
+                ConsumerPump.objects.create(
+                    pump_code=code,
+                    name=name,
+                    address=address,
+                    city=city,
+                    sales_area=area,
+                    sales_officer=so,
+                    engineering_officer=eo,
+                )
+            )
+        p1, p2, p3, p4, p5 = pumps
 
         for pump, labels in [
             (p1, ["2 Dispensing Units", "Canopy Light", "CVT Backup", "Kerb Wall"]),
             (p2, ["3 Dispensing Units", "Underground Tank 20KL", "GenSet 25kVA"]),
             (p3, ["1 Dispensing Unit", "Solar Canopy", "SOP Signage"]),
             (p4, ["2 Dispensing Units", "Dual Underground Tanks"]),
+            (p5, ["Fleet Filling Point", "Canopy Light", "Office Block"]),
         ]:
             for label in labels:
                 PumpFacility.objects.create(pump=pump, label=label)
 
-        metro_user = user("metro.cp", "Metro", "Operator", User.Role.CP_USER, consumer_pump=p1, sales_area=sa1)
-        national_user = user("national.cp", "National", "Operator", User.Role.CP_USER, consumer_pump=p2, sales_area=sa2)
-        tech_user = user("techpark.cp", "TechPark", "Operator", User.Role.CP_USER, consumer_pump=p3, sales_area=sa3)
-        south_user = user("southern.cp", "Southern", "Operator", User.Role.CP_USER, consumer_pump=p4, sales_area=sa4)
+        metro_user = user("supplydepot.cp", "Maj Sudhir", "Yadav", User.Role.CP_USER, consumer_pump=p1, sales_area=sa1)
+        national_user = user("tata.cp", "Nitansh", "Kamboj", User.Role.CP_USER, consumer_pump=p2, sales_area=sa2)
+        tech_user = user("aerolloy.cp", "Manish", "Pandey", User.Role.CP_USER, consumer_pump=p3, sales_area=sa2)
+        south_user = user("ekana.cp", "Pradeep", "Tiwari", User.Role.CP_USER, consumer_pump=p4, sales_area=sa2)
+        user("upsrtc.cp", "Mohd", "Arif", User.Role.CP_USER, consumer_pump=p5, sales_area=sa1)
 
-        apex_user = user("apex.vendor", "Apex", "Technician", User.Role.VENDOR)
-        hydro_user = user("hydrotech.vendor", "HydroTech", "Technician", User.Role.VENDOR)
-        build_user = user("buildwell.vendor", "BuildWell", "Technician", User.Role.VENDOR)
-        omni_user = user("omni.vendor", "Omni", "Technician", User.Role.VENDOR)
-
-        apex = Vendor.objects.create(
-            name="Apex Electrical Solutions",
-            specialization=Vendor.Specialization.ELECTRICAL,
-            phone="+91 98765 11223",
-            email="service@apexelectrical.com",
-            user=apex_user,
-            rating=4.8,
-        )
-        hydro = Vendor.objects.create(
-            name="HydroTech Petroleum Equipment",
-            specialization=Vendor.Specialization.TANK,
-            phone="+91 98765 33445",
-            email="support@hydrotech.com",
-            user=hydro_user,
-            rating=4.9,
-        )
-        build = Vendor.objects.create(
-            name="BuildWell Civil Contractors",
-            specialization=Vendor.Specialization.CIVIL,
-            phone="+91 98765 22334",
-            email="contact@buildwell.in",
-            user=build_user,
-            rating=4.6,
-        )
-        Vendor.objects.create(
-            name="Omni Maintenance Services",
-            specialization=Vendor.Specialization.OTHER,
-            phone="+91 98765 44556",
-            email="info@omnimaint.com",
-            user=omni_user,
-            rating=4.5,
-        )
+        lucknow_vendors = [
+            ("deepak.vendor", "Deepak", "Kumar", "DEEPAK ELECTRIC AND WELDING WORKS", Vendor.Specialization.ELECTRICAL, "9000011001", 4.8),
+            ("electroflow.vendor", "Mushahid", "Khan", "ELECTRO FLOW", Vendor.Specialization.TANK, "9000011002", 4.7),
+            ("luv.vendor", "Chitrakala", "Mallah", "LUV CONSTRUCTION", Vendor.Specialization.CIVIL, "9000011003", 4.6),
+            ("atharv.vendor", "Pankaj", "Tripathi", "ATHARV ENTERPRISES", Vendor.Specialization.OTHER, "9000011004", 4.5),
+            ("kanpurelec.vendor", "Mohit", "Bajpai", "KANPUR ELECTRICAL ENTERPRISES", Vendor.Specialization.ELECTRICAL, "9000011005", 4.6),
+            ("perfect.vendor", "Paldhar", "Mallah", "PERFECT CONSTRUCTION", Vendor.Specialization.CIVIL, "9000011006", 4.4),
+            ("rahat.vendor", "Amir", "Khan", "RAHAT ELECTRIC WORKS", Vendor.Specialization.ELECTRICAL, "9000011007", 4.5),
+            ("spark.vendor", "Shabeena", "Parveen", "SPARK TECHNOCRATS", Vendor.Specialization.ELECTRICAL, "9000011008", 4.7),
+            ("structural.vendor", "Kamal", "Jaiswal", "STRUCTURAL ENGINEERS", Vendor.Specialization.CIVIL, "9000011009", 4.5),
+            ("verma.vendor", "Banvari", "Lal", "VERMA ELECTRONICS", Vendor.Specialization.OTHER, "9000011010", 4.3),
+        ]
+        created_vendors = []
+        for username, first, last, firm, spec, phone, rating in lucknow_vendors:
+            login = user(username, first, last, User.Role.VENDOR)
+            slug = username.split(".")[0]
+            created_vendors.append(
+                Vendor.objects.create(
+                    name=firm,
+                    specialization=spec,
+                    phone=f"+91 {phone}",
+                    email=f"{slug}@pahle.iocl.local",
+                    user=login,
+                    rating=rating,
+                )
+            )
+        apex_user = User.objects.get(username="deepak.vendor")
+        hydro_user = User.objects.get(username="electroflow.vendor")
+        build_user = User.objects.get(username="luv.vendor")
+        apex = created_vendors[0]
+        hydro = created_vendors[1]
+        build = created_vendors[2]
 
         now = timezone.now()
 
@@ -238,8 +246,8 @@ class Command(BaseCommand):
             c1,
             [
                 (Complaint.Status.SUBMITTED, "Complaint lodged", now - timedelta(hours=18)),
-                (Complaint.Status.ASSIGNED_TO_OFFICER, "Auto-mapped to SA-1", now - timedelta(hours=18)),
-                (Complaint.Status.ASSIGNED_TO_VENDOR, "Assigned Apex Electrical Solutions", now - timedelta(hours=16)),
+                (Complaint.Status.ASSIGNED_TO_OFFICER, "Auto-mapped to LKO-I", now - timedelta(hours=18)),
+                (Complaint.Status.ASSIGNED_TO_VENDOR, "Assigned DEEPAK ELECTRIC AND WELDING WORKS", now - timedelta(hours=16)),
                 (Complaint.Status.VENDOR_ACKNOWLEDGED, "Vendor acknowledged", now - timedelta(hours=15)),
                 (Complaint.Status.WORK_IN_PROGRESS, "Work started", now - timedelta(hours=10)),
                 (Complaint.Status.WORK_COMPLETION, "Work completed", now - timedelta(hours=2)),
@@ -271,8 +279,8 @@ class Command(BaseCommand):
             c2,
             [
                 (Complaint.Status.SUBMITTED, "Complaint lodged", now - timedelta(hours=36)),
-                (Complaint.Status.ASSIGNED_TO_OFFICER, "Auto-mapped to SA-2", now - timedelta(hours=36)),
-                (Complaint.Status.ASSIGNED_TO_VENDOR, "Assigned HydroTech", now - timedelta(hours=30)),
+                (Complaint.Status.ASSIGNED_TO_OFFICER, "Auto-mapped to LKO-III", now - timedelta(hours=36)),
+                (Complaint.Status.ASSIGNED_TO_VENDOR, "Assigned ELECTRO FLOW", now - timedelta(hours=30)),
                 (Complaint.Status.VENDOR_ACKNOWLEDGED, "Vendor acknowledged", now - timedelta(hours=28)),
                 (Complaint.Status.WORK_IN_PROGRESS, "Work started", now - timedelta(hours=20)),
             ],
@@ -297,7 +305,7 @@ class Command(BaseCommand):
             complaint=c2,
             reported_by=hydro_user,
             kind=VendorSiteIssue.Kind.PARTS,
-            description="Required nitrile manhole seals are not in local stock. Need approval to source from Mumbai warehouse.",
+            description="Required nitrile manhole seals are not in local stock. Need approval to source from Lucknow warehouse.",
         )
         issue.created_at = now - timedelta(hours=6)
         issue.save(update_fields=["created_at"])
@@ -315,7 +323,7 @@ class Command(BaseCommand):
             complaint_id="CMP-2026-003",
             pump=p3,
             submitted_by=tech_user,
-            sales_officer=anil,
+            sales_officer=priya,
             assigned_vendor=build,
             category=Complaint.Category.CIVIL,
             specific_problem="Kerb wall repair/Painting",
@@ -330,12 +338,12 @@ class Command(BaseCommand):
             c3,
             [
                 (Complaint.Status.SUBMITTED, "Complaint lodged", now - timedelta(hours=10)),
-                (Complaint.Status.ASSIGNED_TO_OFFICER, "Auto-mapped to SA-3", now - timedelta(hours=10)),
-                (Complaint.Status.ASSIGNED_TO_VENDOR, "Assigned BuildWell Civil Contractors", now - timedelta(hours=6)),
+                (Complaint.Status.ASSIGNED_TO_OFFICER, "Auto-mapped to LKO-III", now - timedelta(hours=10)),
+                (Complaint.Status.ASSIGNED_TO_VENDOR, "Assigned LUV CONSTRUCTION", now - timedelta(hours=6)),
             ],
-            anil,
+            priya,
         )
-        notify_transition(c3, anil, Complaint.Status.ASSIGNED_TO_OFFICER, Complaint.Status.ASSIGNED_TO_VENDOR)
+        notify_transition(c3, priya, Complaint.Status.ASSIGNED_TO_OFFICER, Complaint.Status.ASSIGNED_TO_VENDOR)
 
         c4 = Complaint.objects.create(
             complaint_id="CMP-2026-004",
@@ -383,7 +391,7 @@ class Command(BaseCommand):
                 "id": "CMP-2026-022",
                 "pump": p3,
                 "user": tech_user,
-                "officer": anil,
+                "officer": priya,
                 "cat": Complaint.Category.ELECTRICAL,
                 "problem": "Canopy/Pole Light Issue (Illumination / wiring)",
                 "desc": "Three canopy lights on island 2 flickering after rain. Possible loose wiring.",
@@ -427,7 +435,7 @@ class Command(BaseCommand):
                 "id": "CMP-2026-026",
                 "pump": p3,
                 "user": tech_user,
-                "officer": anil,
+                "officer": priya,
                 "cat": Complaint.Category.ELECTRICAL,
                 "problem": "Servo/CVT/Battery Issue (Voltage fluctuation / backup)",
                 "desc": "CVT output dropping below 200V during peak hours; DU #1 trips twice daily.",
@@ -496,7 +504,7 @@ class Command(BaseCommand):
             [
                 (Complaint.Status.SUBMITTED, "Complaint lodged", now - timedelta(days=12)),
                 (Complaint.Status.ASSIGNED_TO_OFFICER, "Auto-mapped", now - timedelta(days=12)),
-                (Complaint.Status.ASSIGNED_TO_VENDOR, "Assigned Apex", now - timedelta(days=12)),
+                (Complaint.Status.ASSIGNED_TO_VENDOR, "Assigned DEEPAK ELECTRIC AND WELDING WORKS", now - timedelta(days=12)),
                 (Complaint.Status.VENDOR_ACKNOWLEDGED, "Ack", now - timedelta(days=12)),
                 (Complaint.Status.WORK_IN_PROGRESS, "Work", now - timedelta(days=12)),
                 (Complaint.Status.WORK_COMPLETION, "Done", now - timedelta(days=11, hours=14)),
@@ -521,8 +529,8 @@ class Command(BaseCommand):
             (apex, p1, metro_user, himanshu, Complaint.Category.ELECTRICAL, "DU Issue (Dispensing Unit failure / meter error)", 11),
             (apex, p1, metro_user, himanshu, Complaint.Category.ELECTRICAL, "Generator Issue (Starter failure / fuel leakage)", 10),
             (hydro, p2, national_user, priya, Complaint.Category.TANK, "Tank Leakage (Seepage / contamination risk)", 14),
-            (build, p3, tech_user, anil, Complaint.Category.CIVIL, "Shed repair/painting", 7),
-            (build, p3, tech_user, anil, Complaint.Category.CIVIL, "SOP/Signage board repair/replacement", 6),
+            (build, p3, tech_user, priya, Complaint.Category.CIVIL, "Shed repair/painting", 7),
+            (build, p3, tech_user, priya, Complaint.Category.CIVIL, "SOP/Signage board repair/replacement", 6),
         ]
         for idx, (vendor, pump, submitter, officer, cat, problem, days) in enumerate(extra, start=10):
             closed = Complaint.objects.create(
@@ -547,23 +555,23 @@ class Command(BaseCommand):
 
         spark = RegistrationRequest.objects.create(
             kind=RegistrationRequest.Kind.VENDOR,
-            username="spark.vendor",
+            username="crown.vendor",
             password_hash=make_password(PASSWORD),
-            first_name="Ravi",
-            last_name="Mehta",
-            email="ravi@sparktech.example",
-            phone="+91 98111 22334",
-            organization_name="Spark Tech Electricals",
-            specialization=Vendor.Specialization.ELECTRICAL,
+            first_name="Pending",
+            last_name="Vendor",
+            email="crown_vendor@pahle.iocl.local",
+            phone="+91 9000011099",
+            organization_name="CROWN CONSTRUCTION AND SUPPLIERS",
+            specialization=Vendor.Specialization.CIVIL,
         )
         cantt = RegistrationRequest.objects.create(
             kind=RegistrationRequest.Kind.CP_USER,
-            username="cantt.cp",
+            username="pending.cp",
             password_hash=make_password(PASSWORD),
-            first_name="Asha",
-            last_name="Singh",
-            email="asha.singh@cantt.example",
-            phone="+91 98222 33445",
+            first_name="Pending",
+            last_name="User",
+            email="pending_cp@pahle.iocl.local",
+            phone="+91 9000011098",
             consumer_pump=p1,
         )
         notify_registration(spark)
