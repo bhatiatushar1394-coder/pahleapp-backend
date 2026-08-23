@@ -1,4 +1,18 @@
+import logging
+
+from django.conf import settings
+from django.core.mail import send_mail
+
 from .models import Complaint, Notification, RegistrationRequest, User
+
+logger = logging.getLogger(__name__)
+
+_SKIP_EMAIL_SUFFIXES = (
+    "@pahle.iocl.local",
+    "@example.com",
+    "@example.org",
+    ".local",
+)
 
 
 def _unique_users(users, exclude=None):
@@ -13,6 +27,37 @@ def _unique_users(users, exclude=None):
         seen.add(user.id)
         out.append(user)
     return out
+
+
+def _can_email(user):
+    address = (getattr(user, "email", "") or "").strip()
+    if "@" not in address:
+        return False
+    lowered = address.lower()
+    return not any(lowered.endswith(suffix) for suffix in _SKIP_EMAIL_SUFFIXES)
+
+
+def _send_emails(recipients, title, body, link=""):
+    if not getattr(settings, "EMAIL_HOST_PASSWORD", ""):
+        return
+    base = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
+    url = f"{base}{link}" if link and base else base
+    text = body.strip()
+    if url:
+        text = f"{text}\n\nOpen in PAHLE-APP: {url}".strip()
+    for user in recipients:
+        if not _can_email(user):
+            continue
+        try:
+            send_mail(
+                subject=f"PAHLE-APP: {title}",
+                message=text or title,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email.strip()],
+                fail_silently=True,
+            )
+        except Exception:
+            logger.exception("Email send failed for %s", user.email)
 
 
 def notify(users, *, kind, title, body="", link="", complaint=None, registration=None, exclude=None):
@@ -33,6 +78,7 @@ def notify(users, *, kind, title, body="", link="", complaint=None, registration
             for user in recipients
         ]
     )
+    _send_emails(recipients, title, body, link)
 
 
 def admins():
