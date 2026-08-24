@@ -41,6 +41,8 @@ class UserPublicSerializer(serializers.ModelSerializer):
     vendor_name = serializers.SerializerMethodField()
     avatar_url = serializers.SerializerMethodField()
     district_area = serializers.SerializerMethodField()
+    amc_type = serializers.SerializerMethodField()
+    amc_type_label = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -67,6 +69,8 @@ class UserPublicSerializer(serializers.ModelSerializer):
             "bio",
             "avatar_url",
             "district_area",
+            "amc_type",
+            "amc_type_label",
         ]
         read_only_fields = fields
 
@@ -104,6 +108,14 @@ class UserPublicSerializer(serializers.ModelSerializer):
             return ""
         names = [d.name for d in obj.sales_area.districts.all()]
         return ", ".join(names)
+
+    def get_amc_type(self, obj):
+        return obj.consumer_pump.amc_type if obj.consumer_pump else ""
+
+    def get_amc_type_label(self, obj):
+        if not obj.consumer_pump or not obj.consumer_pump.amc_type:
+            return ""
+        return obj.consumer_pump.get_amc_type_display()
 
 
 class UserProfileUpdateSerializer(serializers.ModelSerializer):
@@ -178,10 +190,17 @@ class ConsumerPumpSerializer(serializers.ModelSerializer):
         child=serializers.CharField(), write_only=True, required=False
     )
     active_issues = serializers.SerializerMethodField()
+    amc_type_label = serializers.CharField(source="get_amc_type_display", read_only=True)
+    maps_url = serializers.SerializerMethodField()
 
     class Meta:
         model = ConsumerPump
-        extra_kwargs = {"pump_code": {"required": False, "allow_blank": True}}
+        extra_kwargs = {
+            "pump_code": {"required": False, "allow_blank": True},
+            "latitude": {"required": False, "allow_null": True},
+            "longitude": {"required": False, "allow_null": True},
+            "amc_type": {"required": False, "allow_blank": True},
+        }
         fields = [
             "id",
             "pump_code",
@@ -194,6 +213,11 @@ class ConsumerPumpSerializer(serializers.ModelSerializer):
             "sales_officer_detail",
             "engineering_officer",
             "engineering_officer_detail",
+            "latitude",
+            "longitude",
+            "amc_type",
+            "amc_type_label",
+            "maps_url",
             "is_active",
             "facilities",
             "facility_labels",
@@ -202,6 +226,11 @@ class ConsumerPumpSerializer(serializers.ModelSerializer):
 
     def get_active_issues(self, obj):
         return obj.complaints.exclude(status=Complaint.Status.CLOSED).count()
+
+    def get_maps_url(self, obj):
+        if obj.latitude is None or obj.longitude is None:
+            return ""
+        return f"https://www.google.com/maps?q={obj.latitude},{obj.longitude}"
 
     def create(self, validated_data):
         labels = validated_data.pop("facility_labels", [])
@@ -354,6 +383,9 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "category",
             "category_label",
             "specific_problem",
+            "du_make",
+            "du_model",
+            "du_serial",
             "description",
             "priority",
             "priority_label",
@@ -418,6 +450,21 @@ class ComplaintSerializer(serializers.ModelSerializer):
         if not user:
             return None
         return user.get_full_name() or user.username
+
+    def validate(self, attrs):
+        category = attrs.get("category") or getattr(self.instance, "category", None)
+        if category == Complaint.Category.DU:
+            for field, label in (("du_make", "Make"), ("du_model", "Model"), ("du_serial", "Sr. No.")):
+                value = (attrs.get(field) if field in attrs else getattr(self.instance, field, "") or "").strip()
+                if field in attrs:
+                    attrs[field] = value
+                if not value:
+                    raise serializers.ValidationError({field: f"{label} is required for DU related complaints."})
+        elif "category" in attrs:
+            attrs["du_make"] = ""
+            attrs["du_model"] = ""
+            attrs["du_serial"] = ""
+        return attrs
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -492,6 +539,10 @@ class RegistrationCreateSerializer(serializers.Serializer):
     organization_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
     specialization = serializers.CharField(max_length=32, required=False, allow_blank=True)
     consumer_pump = serializers.IntegerField(required=False, allow_null=True)
+    coordinates = serializers.CharField(required=False, allow_blank=True)
+    latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
+    longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
+    amc_type = serializers.CharField(max_length=16, required=False, allow_blank=True)
 
 
 class RegistrationRequestSerializer(serializers.ModelSerializer):
@@ -499,6 +550,8 @@ class RegistrationRequestSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     pump_name = serializers.CharField(source="consumer_pump.name", read_only=True)
     reviewed_by_name = serializers.SerializerMethodField()
+    amc_type_label = serializers.SerializerMethodField()
+    maps_url = serializers.SerializerMethodField()
 
     class Meta:
         model = RegistrationRequest
@@ -517,6 +570,11 @@ class RegistrationRequestSerializer(serializers.ModelSerializer):
             "specialization",
             "consumer_pump",
             "pump_name",
+            "latitude",
+            "longitude",
+            "amc_type",
+            "amc_type_label",
+            "maps_url",
             "admin_note",
             "created_at",
             "reviewed_at",
@@ -525,6 +583,14 @@ class RegistrationRequestSerializer(serializers.ModelSerializer):
 
     def get_reviewed_by_name(self, obj):
         return obj.reviewed_by.get_full_name() if obj.reviewed_by else ""
+
+    def get_amc_type_label(self, obj):
+        return dict(ConsumerPump.AmcType.choices).get(obj.amc_type, obj.amc_type or "")
+
+    def get_maps_url(self, obj):
+        if obj.latitude is None or obj.longitude is None:
+            return ""
+        return f"https://www.google.com/maps?q={obj.latitude},{obj.longitude}"
 
 
 class NotificationSerializer(serializers.ModelSerializer):

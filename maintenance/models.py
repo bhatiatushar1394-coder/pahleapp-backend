@@ -9,7 +9,7 @@ class User(AbstractUser):
         SALES_OFFICER = "SALES_OFFICER", "Sales Officer"
         ENGINEERING_OFFICER = "ENGINEERING_OFFICER", "Engineering Officer"
         DO_OFFICER = "DO_OFFICER", "Divisional Office"
-        CP_USER = "CP_USER", "Consumer Pump User"
+        CP_USER = "CP_USER", "Customer"
         VENDOR = "VENDOR", "Vendor / Technician"
 
     role = models.CharField(max_length=32, choices=Role.choices, default=Role.CP_USER)
@@ -65,6 +65,10 @@ class District(models.Model):
 
 
 class ConsumerPump(models.Model):
+    class AmcType(models.TextChoices):
+        AMC = "AMC", "AMC"
+        NON_AMC = "NON_AMC", "Non AMC"
+
     pump_code = models.CharField(max_length=32, unique=True)
     name = models.CharField(max_length=200)
     address = models.CharField(max_length=255)
@@ -76,6 +80,9 @@ class ConsumerPump(models.Model):
     engineering_officer = models.ForeignKey(
         User, on_delete=models.PROTECT, related_name="eo_pumps"
     )
+    latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    amc_type = models.CharField(max_length=16, choices=AmcType.choices, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -151,6 +158,9 @@ class Complaint(models.Model):
     )
     category = models.CharField(max_length=32, choices=Category.choices)
     specific_problem = models.CharField(max_length=200)
+    du_make = models.CharField(max_length=80, blank=True)
+    du_model = models.CharField(max_length=80, blank=True)
+    du_serial = models.CharField(max_length=80, blank=True)
     description = models.TextField()
     priority = models.CharField(max_length=16, choices=Priority.choices, default=Priority.MEDIUM)
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.SUBMITTED)
@@ -267,7 +277,7 @@ class StatusHistory(models.Model):
 
 class RegistrationRequest(models.Model):
     class Kind(models.TextChoices):
-        CP_USER = "CP_USER", "Consumer Pump User"
+        CP_USER = "CP_USER", "Customer"
         VENDOR = "VENDOR", "Vendor / Technician"
 
     class Status(models.TextChoices):
@@ -288,6 +298,9 @@ class RegistrationRequest(models.Model):
     consumer_pump = models.ForeignKey(
         ConsumerPump, null=True, blank=True, on_delete=models.SET_NULL, related_name="registration_requests"
     )
+    latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    amc_type = models.CharField(max_length=16, blank=True)
     admin_note = models.CharField(max_length=255, blank=True)
     created_user = models.ForeignKey(
         User, null=True, blank=True, on_delete=models.SET_NULL, related_name="approved_from_registration"
@@ -335,3 +348,14 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"{self.recipient_id}: {self.title}"
+
+
+class StoredFile(models.Model):
+    path = models.CharField(max_length=255, unique=True)
+    data = models.BinaryField()
+    content_type = models.CharField(max_length=100, default="application/octet-stream")
+    size = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.path

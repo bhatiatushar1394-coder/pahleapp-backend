@@ -120,7 +120,7 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STORAGES = {
     "default": {
-        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "BACKEND": "maintenance.db_storage.DatabaseStorage",
     },
     "staticfiles": {
         "BACKEND": (
@@ -140,7 +140,7 @@ BACKEND_PUBLIC_URL = os.environ.get("BACKEND_PUBLIC_URL") or (
     f"https://{render_host}" if render_host else "http://127.0.0.1:8000"
 )
 
-cors_default = "http://localhost:3000,http://127.0.0.1:3000,https://pahleapp-frontend.vercel.app"
+cors_default = "http://localhost:3000,http://127.0.0.1:3000,https://pahleapp-frontend.vercel.app,https://pahle-app.in,https://www.pahle-app.in"
 env_origins = [
     origin.strip()
     for origin in os.environ.get("CORS_ALLOWED_ORIGINS", cors_default).split(",")

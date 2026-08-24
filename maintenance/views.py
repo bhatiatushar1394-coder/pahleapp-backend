@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .constants import PROBLEM_MASTER, SLA_HOURS, STATUS_FLOW
+from .geo import parse_coordinates
 from .models import (
     Complaint,
     ComplaintFeedback,
@@ -189,6 +190,23 @@ def register_view(request):
     spec = (data.get("specialization") or "").upper()
     if data["kind"] == RegistrationRequest.Kind.VENDOR and spec not in Vendor.Specialization.values:
         spec = Vendor.Specialization.OTHER
+    latitude = longitude = None
+    amc_type = ""
+    if data["kind"] == RegistrationRequest.Kind.CP_USER:
+        parsed = parse_coordinates(
+            data.get("coordinates") or "",
+            data.get("latitude"),
+            data.get("longitude"),
+        )
+        if not parsed:
+            return Response(
+                {"detail": "Enter Google Maps coordinates as latitude, longitude (example: 26.8467, 80.9462)."},
+                status=400,
+            )
+        latitude, longitude = parsed
+        amc_type = (data.get("amc_type") or "").upper()
+        if amc_type not in ConsumerPump.AmcType.values:
+            return Response({"detail": "Select AMC or Non AMC."}, status=400)
     rec = RegistrationRequest.objects.create(
         kind=data["kind"],
         username=username,
@@ -200,6 +218,9 @@ def register_view(request):
         organization_name=(data.get("organization_name") or "").strip(),
         specialization=spec if data["kind"] == RegistrationRequest.Kind.VENDOR else "",
         consumer_pump=pump if data["kind"] == RegistrationRequest.Kind.CP_USER else None,
+        latitude=latitude,
+        longitude=longitude,
+        amc_type=amc_type,
     )
     notify_registration(rec)
     return Response(RegistrationRequestSerializer(rec).data, status=201)
@@ -253,6 +274,18 @@ class RegistrationViewSet(viewsets.ReadOnlyModelViewSet):
             user.consumer_pump = rec.consumer_pump
             user.sales_area = rec.consumer_pump.sales_area
         user.save()
+        if rec.kind == RegistrationRequest.Kind.CP_USER and rec.consumer_pump:
+            pump = rec.consumer_pump
+            changed = []
+            if rec.latitude is not None and rec.longitude is not None:
+                pump.latitude = rec.latitude
+                pump.longitude = rec.longitude
+                changed += ["latitude", "longitude"]
+            if rec.amc_type:
+                pump.amc_type = rec.amc_type
+                changed.append("amc_type")
+            if changed:
+                pump.save(update_fields=changed)
         if rec.kind == RegistrationRequest.Kind.VENDOR:
             Vendor.objects.create(
                 name=rec.organization_name or f"{rec.first_name} {rec.last_name}".strip() or rec.username,
@@ -628,7 +661,7 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         is_officer = request.user.role in OFFICER_ROLES
         is_customer = request.user.role == User.Role.CP_USER
         if not is_officer and not is_customer:
-            return Response({"detail": "Only the pump user or an officer can update this complaint."}, status=403)
+            return Response({"detail": "Only the customer or an officer can update this complaint."}, status=403)
         if is_customer and not (
             complaint.submitted_by_id == request.user.id
             or complaint.pump_id == request.user.consumer_pump_id
@@ -644,6 +677,19 @@ class ComplaintViewSet(viewsets.ModelViewSet):
             complaint.category = category
             complaint.specific_problem = complaint.get_category_display()
             complaint.sla_hours = SLA_HOURS.get(category, complaint.sla_hours)
+        if complaint.category == Complaint.Category.DU:
+            for field in ("du_make", "du_model", "du_serial"):
+                if request.data.get(field) is not None:
+                    setattr(complaint, field, str(request.data.get(field) or "").strip())
+            if not (complaint.du_make and complaint.du_model and complaint.du_serial):
+                return Response(
+                    {"detail": "Make, Model and Sr. No. are required for DU related complaints."},
+                    status=400,
+                )
+        else:
+            complaint.du_make = ""
+            complaint.du_model = ""
+            complaint.du_serial = ""
         if is_officer and request.data.get("officer_remarks") is not None:
             complaint.officer_remarks = str(request.data.get("officer_remarks") or "")
         complaint.save()
@@ -845,7 +891,7 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         if complaint.status == Complaint.Status.CLOSED:
             return Response({"detail": "Closed complaints cannot be escalated."}, status=400)
         if request.user.role != User.Role.CP_USER:
-            return Response({"detail": "Only the pump user can escalate this complaint."}, status=403)
+            return Response({"detail": "Only the customer can escalate this complaint."}, status=403)
         if not (
             complaint.submitted_by_id == request.user.id
             or complaint.pump_id == request.user.consumer_pump_id
@@ -970,6 +1016,9 @@ def reports_export(request):
                 "Consumer Pump",
                 "Area & DO",
                 "Category",
+                "DU Make",
+                "DU Model",
+                "DU Sr. No.",
                 "Issue",
                 "Vendor",
                 "Aging Days",
@@ -987,6 +1036,9 @@ def reports_export(request):
                     c.pump.name,
                     f"{area.code} {area.name} ({area.divisional_office.name})",
                     c.get_category_display(),
+                    c.du_make,
+                    c.du_model,
+                    c.du_serial,
                     c.specific_problem,
                     c.assigned_vendor.name if c.assigned_vendor else "Unassigned",
                     c.aging_days if c.aging_days is not None else "",

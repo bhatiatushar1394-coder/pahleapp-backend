@@ -185,7 +185,7 @@ def notify_escalation(complaint, actor, note):
     notify(
         complaint_officers(complaint),
         kind=Notification.Kind.ESCALATION,
-        title=f"{cid} escalated by the pump user",
+        title=f"{cid} escalated by the customer",
         body=note[:400] or f"{complaint.pump.name}: user asked for faster action.",
         link=complaint_link(complaint),
         complaint=complaint,
@@ -326,7 +326,7 @@ def notify_transition(complaint, actor, from_status, to_status):
             [vendor_user],
             kind=Notification.Kind.STATUS,
             title=f"{cid} was closed",
-            body="The pump user confirmed the work.",
+            body="The customer confirmed the work.",
             link=link,
             complaint=complaint,
             exclude=actor,
