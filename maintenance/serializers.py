@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework import serializers
 
 from .constants import SLA_HOURS
@@ -16,6 +17,18 @@ from .models import (
     Notification,
     VendorSiteIssue,
 )
+
+
+def file_public_url(file_field, request=None):
+    if not file_field:
+        return None
+    url = file_field.url
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    if request:
+        return request.build_absolute_uri(url)
+    base = (getattr(settings, "BACKEND_PUBLIC_URL", "") or "").rstrip("/")
+    return f"{base}{url}" if base else url
 
 
 class UserPublicSerializer(serializers.ModelSerializer):
@@ -81,12 +94,7 @@ class UserPublicSerializer(serializers.ModelSerializer):
             return ""
 
     def get_avatar_url(self, obj):
-        if not obj.avatar:
-            return None
-        request = self.context.get("request")
-        if request:
-            return request.build_absolute_uri(obj.avatar.url)
-        return obj.avatar.url
+        return file_public_url(obj.avatar, self.context.get("request"))
 
 
 class UserProfileUpdateSerializer(serializers.ModelSerializer):
@@ -249,10 +257,7 @@ class ComplaintMediaSerializer(serializers.ModelSerializer):
         fields = ["id", "kind", "url", "uploaded_at"]
 
     def get_url(self, obj):
-        request = self.context.get("request")
-        if obj.file and request:
-            return request.build_absolute_uri(obj.file.url)
-        return obj.file.url if obj.file else None
+        return file_public_url(obj.file, self.context.get("request"))
 
 
 class ComplaintFeedbackSerializer(serializers.ModelSerializer):
@@ -295,12 +300,7 @@ class VendorSiteIssueSerializer(serializers.ModelSerializer):
         return obj.reported_by.get_full_name() or obj.reported_by.username
 
     def get_photo_url(self, obj):
-        if not obj.photo:
-            return None
-        request = self.context.get("request")
-        if request:
-            return request.build_absolute_uri(obj.photo.url)
-        return obj.photo.url
+        return file_public_url(obj.photo, self.context.get("request"))
 
 
 class ComplaintSerializer(serializers.ModelSerializer):
@@ -314,6 +314,7 @@ class ComplaintSerializer(serializers.ModelSerializer):
     priority_label = serializers.CharField(source="get_priority_display", read_only=True)
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     aging_hours = serializers.IntegerField(read_only=True)
+    aging_days = serializers.IntegerField(read_only=True, allow_null=True)
     is_overdue = serializers.BooleanField(read_only=True)
     estimation_reviewed_by_name = serializers.SerializerMethodField()
     media = ComplaintMediaSerializer(many=True, read_only=True)
@@ -354,6 +355,7 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "estimation_review_note",
             "sla_hours",
             "aging_hours",
+            "aging_days",
             "is_overdue",
             "escalated_at",
             "escalation_note",
@@ -404,6 +406,17 @@ class ComplaintSerializer(serializers.ModelSerializer):
             return None
         return user.get_full_name() or user.username
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        if request and getattr(request.user, "role", None) == User.Role.CP_USER:
+            data["estimation_amount"] = None
+            data["estimation_remarks"] = ""
+            data["estimation_reviewed_by_name"] = None
+            data["estimation_reviewed_at"] = None
+            data["estimation_review_note"] = ""
+        return data
+
     def create(self, validated_data):
         request = self.context["request"]
         pump = validated_data["pump"]
@@ -411,6 +424,8 @@ class ComplaintSerializer(serializers.ModelSerializer):
             pump = request.user.consumer_pump
             validated_data["pump"] = pump
         category = validated_data["category"]
+        label = dict(Complaint.Category.choices).get(category, category)
+        validated_data["specific_problem"] = (validated_data.get("specific_problem") or "").strip() or label
         complaint = Complaint.objects.create(
             complaint_id=self._next_id(),
             submitted_by=request.user,

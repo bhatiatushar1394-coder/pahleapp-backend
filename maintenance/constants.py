@@ -1,27 +1,16 @@
 PROBLEM_MASTER = {
-    "ELECTRICAL": [
-        "DU Issue (Dispensing Unit failure / meter error)",
-        "Servo/CVT/Battery Issue (Voltage fluctuation / backup)",
-        "Canopy/Pole Light Issue (Illumination / wiring)",
-        "Generator Issue (Starter failure / fuel leakage)",
-    ],
-    "TANK": [
-        "Tank Leakage (Seepage / contamination risk)",
-    ],
-    "CIVIL": [
-        "Kerb wall repair/Painting",
-        "Shed repair/painting",
-        "SOP/Signage board repair/replacement",
-    ],
-    "OTHER": [
-        "Any other issues (Pneumatic line, air compressor, CCTV, general)",
-    ],
+    "TANK": ["Tank Related"],
+    "DU": ["DU related"],
+    "CIVIL": ["Civil Work"],
+    "ELECTRICAL": ["Electrical Work"],
+    "OTHER": ["Others"],
 }
 
 SLA_HOURS = {
-    "ELECTRICAL": 24,
     "TANK": 48,
+    "DU": 24,
     "CIVIL": 72,
+    "ELECTRICAL": 24,
     "OTHER": 48,
 }
 

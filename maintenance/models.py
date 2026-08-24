@@ -103,10 +103,11 @@ class Vendor(models.Model):
 
 class Complaint(models.Model):
     class Category(models.TextChoices):
-        ELECTRICAL = "ELECTRICAL", "Electrical"
-        TANK = "TANK", "Tank"
-        CIVIL = "CIVIL", "Civil"
-        OTHER = "OTHER", "Other"
+        TANK = "TANK", "Tank Related"
+        DU = "DU", "DU related"
+        CIVIL = "CIVIL", "Civil Work"
+        ELECTRICAL = "ELECTRICAL", "Electrical Work"
+        OTHER = "OTHER", "Others"
 
     class Priority(models.TextChoices):
         LOW = "LOW", "Low"
@@ -175,6 +176,20 @@ class Complaint(models.Model):
         return int((end - self.created_at).total_seconds() // 3600)
 
     @property
+    def aging_days(self):
+        allotted = None
+        for row in self.history.all():
+            if row.to_status != self.Status.ASSIGNED_TO_VENDOR:
+                continue
+            if allotted is None or row.created_at < allotted:
+                allotted = row.created_at
+        if allotted is None:
+            return None
+        end = timezone.localtime(self.closed_at or timezone.now()).date()
+        start = timezone.localtime(allotted).date()
+        return max(0, (end - start).days)
+
+    @property
     def is_overdue(self):
         return self.status != self.Status.CLOSED and self.aging_hours > self.sla_hours
 
@@ -184,10 +199,11 @@ class ComplaintMedia(models.Model):
         USER_PHOTO = "USER_PHOTO", "User Photo"
         BEFORE_PROOF = "BEFORE_PROOF", "Before Proof"
         AFTER_PROOF = "AFTER_PROOF", "After Proof"
+        CERTIFICATE = "CERTIFICATE", "Work Completion Certificate"
         VIDEO = "VIDEO", "Video"
 
     complaint = models.ForeignKey(Complaint, on_delete=models.CASCADE, related_name="media")
-    kind = models.CharField(max_length=20, choices=Kind.choices)
+    kind = models.CharField(max_length=32, choices=Kind.choices)
     file = models.FileField(upload_to="complaints/%Y/%m/")
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)

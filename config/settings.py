@@ -134,6 +134,11 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+BACKEND_PUBLIC_URL = os.environ.get("BACKEND_PUBLIC_URL") or (
+    f"https://{render_host}" if render_host else "http://127.0.0.1:8000"
+)
 
 cors_default = "http://localhost:3000,http://127.0.0.1:3000,https://pahleapp-frontend.vercel.app"
 env_origins = [

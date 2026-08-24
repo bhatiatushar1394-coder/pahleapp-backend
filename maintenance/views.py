@@ -29,6 +29,7 @@ from .models import (
     VendorSiteIssue,
 )
 from .notifications import (
+    notify,
     notify_escalation,
     notify_new_complaint,
     notify_registration,
@@ -530,11 +531,114 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         if request.user.role not in OFFICER_ROLES:
             return Response({"detail": "Only officers can assign vendors."}, status=403)
         complaint = self.get_object()
-        vendor = Vendor.objects.get(pk=request.data.get("vendor_id"))
+        if complaint.status == Complaint.Status.CLOSED:
+            return Response({"detail": "Closed jobs cannot be reassigned."}, status=400)
+        vendor_id = request.data.get("vendor_id")
+        if not vendor_id:
+            return Response({"detail": "Select a vendor."}, status=400)
+        try:
+            vendor = Vendor.objects.get(pk=vendor_id)
+        except Vendor.DoesNotExist:
+            return Response({"detail": "Vendor not found."}, status=400)
+        previous = complaint.assigned_vendor
+        reassign = previous is not None and previous.id != vendor.id
         complaint.assigned_vendor = vendor
         complaint.officer_remarks = request.data.get("officer_remarks", complaint.officer_remarks)
+        if reassign:
+            complaint.estimation_remarks = ""
+            complaint.estimation_amount = None
+            complaint.estimation_reviewed_by = None
+            complaint.estimation_reviewed_at = None
+            complaint.estimation_review_note = ""
         complaint.save()
-        transition(complaint, Complaint.Status.ASSIGNED_TO_VENDOR, request.user, f"Assigned {vendor.name}")
+        if reassign and previous and previous.user:
+            notify(
+                [previous.user],
+                kind=Notification.Kind.STATUS,
+                title=f"{complaint.complaint_id} was reassigned",
+                body=f"This job was moved from {previous.name} to {vendor.name}.",
+                link=f"/complaints?q={complaint.complaint_id}",
+                complaint=complaint,
+                exclude=request.user,
+            )
+        note = (
+            f"Reassigned from {previous.name} to {vendor.name}"
+            if reassign
+            else f"Assigned {vendor.name}"
+        )
+        transition(complaint, Complaint.Status.ASSIGNED_TO_VENDOR, request.user, note)
+        return Response(self.get_serializer(complaint).data)
+
+    @action(detail=True, methods=["post"], url_path="update-work")
+    def update_work(self, request, pk=None):
+        complaint = self.get_object()
+        if request.user.role != User.Role.VENDOR:
+            return Response({"detail": "Only the assigned vendor can update work."}, status=403)
+        profile = getattr(request.user, "vendor_profile", None)
+        if not profile or complaint.assigned_vendor_id != profile.id:
+            return Response({"detail": "This job is not assigned to you."}, status=403)
+        if complaint.status == Complaint.Status.CLOSED:
+            return Response({"detail": "Closed jobs cannot be edited."}, status=400)
+        complaint.vendor_remarks = request.data.get("vendor_remarks", complaint.vendor_remarks)
+        complaint.save(update_fields=["vendor_remarks", "updated_at"])
+        photo_kind = (
+            ComplaintMedia.Kind.AFTER_PROOF
+            if complaint.status == Complaint.Status.WORK_COMPLETION
+            else ComplaintMedia.Kind.BEFORE_PROOF
+        )
+        for f in request.FILES.getlist("photos") or request.FILES.getlist("photos[]"):
+            ComplaintMedia.objects.create(
+                complaint=complaint,
+                kind=photo_kind,
+                file=f,
+                uploaded_by=request.user,
+            )
+        StatusHistory.objects.create(
+            complaint=complaint,
+            from_status=complaint.status,
+            to_status=complaint.status,
+            actor=request.user,
+            note="Vendor updated job details",
+        )
+        return Response(self.get_serializer(complaint).data)
+
+    @action(detail=True, methods=["post"], url_path="update-details")
+    def update_details(self, request, pk=None):
+        complaint = self.get_object()
+        is_officer = request.user.role in OFFICER_ROLES
+        is_customer = request.user.role == User.Role.CP_USER
+        if not is_officer and not is_customer:
+            return Response({"detail": "Only the pump user or an officer can update this complaint."}, status=403)
+        if is_customer and not (
+            complaint.submitted_by_id == request.user.id
+            or complaint.pump_id == request.user.consumer_pump_id
+        ):
+            return Response({"detail": "You can only update complaints for your pump."}, status=403)
+        if complaint.status == Complaint.Status.CLOSED:
+            return Response({"detail": "Closed jobs cannot be edited. File a new complaint if work is still needed."}, status=400)
+        description = request.data.get("description")
+        category = request.data.get("category")
+        if description is not None:
+            complaint.description = str(description).strip() or complaint.description
+        if category and category in Complaint.Category.values:
+            complaint.category = category
+            complaint.specific_problem = complaint.get_category_display()
+            complaint.sla_hours = SLA_HOURS.get(category, complaint.sla_hours)
+        if is_officer and request.data.get("officer_remarks") is not None:
+            complaint.officer_remarks = str(request.data.get("officer_remarks") or "")
+        complaint.save()
+        for f in request.FILES.getlist("photos") or request.FILES.getlist("photos[]"):
+            kind = ComplaintMedia.Kind.VIDEO if getattr(f, "content_type", "").startswith("video") else ComplaintMedia.Kind.USER_PHOTO
+            ComplaintMedia.objects.create(
+                complaint=complaint, kind=kind, file=f, uploaded_by=request.user
+            )
+        StatusHistory.objects.create(
+            complaint=complaint,
+            from_status=complaint.status,
+            to_status=complaint.status,
+            actor=request.user,
+            note="Complaint details updated",
+        )
         return Response(self.get_serializer(complaint).data)
 
     @action(detail=True, methods=["post"])
@@ -678,34 +782,41 @@ class ComplaintViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def confirm(self, request, pk=None):
         complaint = self.get_object()
-        if request.user.role not in (User.Role.CP_USER, User.Role.ADMIN, User.Role.SALES_OFFICER):
+        if request.user.role != User.Role.CP_USER and request.user.role not in OFFICER_ROLES:
             return Response({"detail": "Not allowed to confirm resolution."}, status=403)
-        resolved = str(request.data.get("resolved", "true")).lower() in ("1", "true", "yes")
         rating = int(request.data.get("rating") or 5)
         remarks = request.data.get("remarks", "")
         ComplaintFeedback.objects.update_or_create(
             complaint=complaint,
             defaults={
-                "resolved": resolved,
+                "resolved": True,
                 "rating": rating,
                 "remarks": remarks,
                 "submitted_by": request.user,
             },
         )
-        if resolved:
-            transition(complaint, Complaint.Status.USER_CONFIRMATION, request.user, "User confirmed", notify=False)
-            transition(complaint, Complaint.Status.CLOSED, request.user, "Closed")
-            vendor = complaint.assigned_vendor
-            if vendor:
-                ratings = ComplaintFeedback.objects.filter(
-                    complaint__assigned_vendor=vendor, complaint__status=Complaint.Status.CLOSED
-                )
-                avg = ratings.aggregate(avg=Avg("rating"))["avg"]
-                if avg:
-                    vendor.rating = round(avg, 1)
-                    vendor.save(update_fields=["rating"])
-        else:
-            transition(complaint, Complaint.Status.WORK_IN_PROGRESS, request.user, "Re-work requested")
+        for f in (
+            request.FILES.getlist("certificate")
+            or request.FILES.getlist("photos")
+            or request.FILES.getlist("photos[]")
+        ):
+            ComplaintMedia.objects.create(
+                complaint=complaint,
+                kind=ComplaintMedia.Kind.CERTIFICATE,
+                file=f,
+                uploaded_by=request.user,
+            )
+        transition(complaint, Complaint.Status.USER_CONFIRMATION, request.user, "User confirmed", notify=False)
+        transition(complaint, Complaint.Status.CLOSED, request.user, "Closed")
+        vendor = complaint.assigned_vendor
+        if vendor:
+            ratings = ComplaintFeedback.objects.filter(
+                complaint__assigned_vendor=vendor, complaint__status=Complaint.Status.CLOSED
+            )
+            avg = ratings.aggregate(avg=Avg("rating"))["avg"]
+            if avg:
+                vendor.rating = round(avg, 1)
+                vendor.save(update_fields=["rating"])
         return Response(self.get_serializer(complaint).data)
 
     @action(detail=True, methods=["post"])
@@ -841,8 +952,7 @@ def reports_export(request):
                 "Category",
                 "Issue",
                 "Vendor",
-                "Aging Hours",
-                "SLA Hours",
+                "Aging Days",
                 "Status",
                 "User Rating",
             ]
@@ -859,8 +969,7 @@ def reports_export(request):
                     c.get_category_display(),
                     c.specific_problem,
                     c.assigned_vendor.name if c.assigned_vendor else "Unassigned",
-                    c.aging_hours,
-                    c.sla_hours,
+                    c.aging_days if c.aging_days is not None else "",
                     c.get_status_display(),
                     rating,
                 ]
