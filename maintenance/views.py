@@ -119,6 +119,20 @@ def transition(complaint, to_status, actor, note="", notify=True):
     return history
 
 
+@api_view(["POST"])
+def assistant_chat_view(request):
+    from .ai_agent import run_assistant
+
+    messages = request.data.get("messages")
+    if not isinstance(messages, list):
+        return Response({"detail": "Send messages as a list."}, status=400)
+    try:
+        result = run_assistant(request.user, messages, request)
+    except RuntimeError as exc:
+        return Response({"detail": str(exc)}, status=503)
+    return Response(result)
+
+
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def health_view(request):
