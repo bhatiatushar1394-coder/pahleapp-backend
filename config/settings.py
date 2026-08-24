@@ -175,6 +175,9 @@ SIMPLE_JWT = {
 DATA_UPLOAD_MAX_MEMORY_SIZE = 12 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 12 * 1024 * 1024
 
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+GROQ_TIMEOUT = int(os.environ.get("GROQ_TIMEOUT", "45"))
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://pahleapp-frontend.vercel.app")
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.resend.com")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "465"))

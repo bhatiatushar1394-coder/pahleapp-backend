@@ -120,6 +120,36 @@ def transition(complaint, to_status, actor, note="", notify=True):
 
 
 @api_view(["GET"])
+def assistant_models_view(request):
+    from .ai_agent import groq_model_catalog
+
+    return Response(groq_model_catalog())
+
+
+@api_view(["POST"])
+def assistant_chat_view(request):
+    from .ai_agent import GroqRateLimit, run_assistant
+
+    messages = request.data.get("messages")
+    if not isinstance(messages, list):
+        return Response({"detail": "Send messages as a list."}, status=400)
+    try:
+        result = run_assistant(request.user, messages, request, model=request.data.get("model"))
+    except GroqRateLimit as exc:
+        wait = int(exc.retry_after) + 1
+        return Response(
+            {
+                "detail": str(exc) or f"Rate limit reached. Try again in about {wait}s, or switch model.",
+                "retry_after": exc.retry_after,
+            },
+            status=429,
+        )
+    except RuntimeError as exc:
+        return Response({"detail": str(exc)}, status=503)
+    return Response(result)
+
+
+@api_view(["GET"])
 @permission_classes([AllowAny])
 def health_view(request):
     return Response({"status": "ok"})

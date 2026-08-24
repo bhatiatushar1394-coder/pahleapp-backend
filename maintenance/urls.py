@@ -17,6 +17,8 @@ urlpatterns = [
     path("auth/register/", views.register_view),
     path("auth/register-options/", views.register_options_view),
     path("health/", views.health_view),
+    path("ai/models/", views.assistant_models_view),
+    path("ai/chat/", views.assistant_chat_view),
     path("meta/", views.meta_view),
     path("dashboard/", views.dashboard_view),
     path("users/", views.users_directory_view),
