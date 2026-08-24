@@ -40,6 +40,7 @@ class UserPublicSerializer(serializers.ModelSerializer):
     vendor_id = serializers.SerializerMethodField()
     vendor_name = serializers.SerializerMethodField()
     avatar_url = serializers.SerializerMethodField()
+    district_area = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -65,7 +66,9 @@ class UserPublicSerializer(serializers.ModelSerializer):
             "employee_code",
             "bio",
             "avatar_url",
+            "district_area",
         ]
+        read_only_fields = fields
 
     def get_full_name(self, obj):
         return obj.get_full_name() or obj.username
@@ -95,6 +98,12 @@ class UserPublicSerializer(serializers.ModelSerializer):
 
     def get_avatar_url(self, obj):
         return file_public_url(obj.avatar, self.context.get("request"))
+
+    def get_district_area(self, obj):
+        if not obj.sales_area_id:
+            return ""
+        names = [d.name for d in obj.sales_area.districts.all()]
+        return ", ".join(names)
 
 
 class UserProfileUpdateSerializer(serializers.ModelSerializer):
@@ -138,10 +147,14 @@ class LoginSerializer(serializers.Serializer):
 
 class SalesAreaSerializer(serializers.ModelSerializer):
     divisional_office_name = serializers.CharField(source="divisional_office.name", read_only=True)
+    districts = serializers.SerializerMethodField()
 
     class Meta:
         model = SalesArea
-        fields = ["id", "code", "name", "zone", "divisional_office", "divisional_office_name"]
+        fields = ["id", "code", "name", "zone", "divisional_office", "divisional_office_name", "districts"]
+
+    def get_districts(self, obj):
+        return [d.name for d in obj.districts.all()]
 
 
 class DivisionalOfficeSerializer(serializers.ModelSerializer):

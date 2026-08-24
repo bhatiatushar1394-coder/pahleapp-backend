@@ -582,4 +582,8 @@ class Command(BaseCommand):
         notify_registration(spark)
         notify_registration(cantt)
 
+        from maintenance.ibsa import apply_ibsa_officers
+
+        apply_ibsa_officers()
+
         self.stdout.write(self.style.SUCCESS("Seeded PAHLE-APP demo data. Password for all users: Pahle@123"))

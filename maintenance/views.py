@@ -210,8 +210,19 @@ def users_directory_view(request):
     if request.user.role not in OFFICER_ROLES:
         return Response({"detail": "Only officers can view the user directory."}, status=403)
     qs = (
-        User.objects.filter(role__in=[User.Role.CP_USER, User.Role.VENDOR], is_active=True)
+        User.objects.filter(
+            role__in=[
+                User.Role.CP_USER,
+                User.Role.VENDOR,
+                User.Role.ADMIN,
+                User.Role.SALES_OFFICER,
+                User.Role.ENGINEERING_OFFICER,
+                User.Role.DO_OFFICER,
+            ],
+            is_active=True,
+        )
         .select_related("consumer_pump", "sales_area", "sales_area__divisional_office", "divisional_office", "vendor_profile")
+        .prefetch_related("sales_area__districts")
         .order_by("role", "first_name", "username")
     )
     return Response(UserPublicSerializer(qs, many=True, context={"request": request}).data)
@@ -276,7 +287,8 @@ class RegistrationViewSet(viewsets.ReadOnlyModelViewSet):
 @parser_classes([JSONParser, MultiPartParser, FormParser])
 def me_view(request):
     if request.method == "GET":
-        return Response(UserPublicSerializer(request.user, context={"request": request}).data)
+        user = User.objects.select_related("sales_area", "sales_area__divisional_office", "divisional_office").prefetch_related("sales_area__districts").get(pk=request.user.pk)
+        return Response(UserPublicSerializer(user, context={"request": request}).data)
     serializer = UserProfileUpdateSerializer(request.user, data=request.data, partial=True)
     serializer.is_valid(raise_exception=True)
     serializer.save()
@@ -286,13 +298,21 @@ def me_view(request):
 
 @api_view(["GET"])
 def meta_view(request):
-    officers = User.objects.filter(role__in=OFFICER_ROLES).order_by("first_name")
+    officers = (
+        User.objects.filter(role__in=OFFICER_ROLES)
+        .select_related("sales_area", "sales_area__divisional_office", "divisional_office")
+        .prefetch_related("sales_area__districts")
+        .order_by("first_name")
+    )
     return Response(
         {
             "problem_master": PROBLEM_MASTER,
             "sla_hours": SLA_HOURS,
             "status_flow": STATUS_FLOW,
-            "sales_areas": SalesAreaSerializer(SalesArea.objects.select_related("divisional_office"), many=True).data,
+            "sales_areas": SalesAreaSerializer(
+                SalesArea.objects.select_related("divisional_office").prefetch_related("districts"),
+                many=True,
+            ).data,
             "divisional_offices": DivisionalOfficeSerializer(DivisionalOffice.objects.all(), many=True).data,
             "officers": UserPublicSerializer(officers, many=True, context={"request": request}).data,
             "site_issue_kinds": [

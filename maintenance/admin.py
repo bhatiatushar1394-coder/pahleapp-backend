@@ -5,6 +5,7 @@ from .models import (
     ComplaintFeedback,
     ComplaintMedia,
     ConsumerPump,
+    District,
     DivisionalOffice,
     PumpFacility,
     SalesArea,
@@ -25,6 +26,7 @@ class UserAdmin(admin.ModelAdmin):
 
 admin.site.register(DivisionalOffice)
 admin.site.register(SalesArea)
+admin.site.register(District)
 admin.site.register(ConsumerPump)
 admin.site.register(PumpFacility)
 admin.site.register(Vendor)

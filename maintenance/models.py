@@ -52,6 +52,18 @@ class SalesArea(models.Model):
         return f"{self.code} {self.name}"
 
 
+class District(models.Model):
+    name = models.CharField(max_length=80)
+    sales_area = models.ForeignKey(SalesArea, on_delete=models.CASCADE, related_name="districts")
+
+    class Meta:
+        ordering = ["name"]
+        unique_together = ("sales_area", "name")
+
+    def __str__(self):
+        return f"{self.name} ({self.sales_area.code})"
+
+
 class ConsumerPump(models.Model):
     pump_code = models.CharField(max_length=32, unique=True)
     name = models.CharField(max_length=200)
