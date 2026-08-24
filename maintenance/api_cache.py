@@ -16,7 +16,6 @@ SKIP_PREFIXES = (
     "/api/auth/login/",
     "/api/auth/register/",
     "/api/notifications",
-    "/api/ai/",
 )
 
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
