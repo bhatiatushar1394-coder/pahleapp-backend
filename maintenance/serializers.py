@@ -2,6 +2,7 @@ from django.conf import settings
 from rest_framework import serializers
 
 from .constants import SLA_HOURS
+from .geo import google_maps_url
 from .models import (
     Complaint,
     ComplaintFeedback,
@@ -228,9 +229,7 @@ class ConsumerPumpSerializer(serializers.ModelSerializer):
         return obj.complaints.exclude(status=Complaint.Status.CLOSED).count()
 
     def get_maps_url(self, obj):
-        if obj.latitude is None or obj.longitude is None:
-            return ""
-        return f"https://www.google.com/maps?q={obj.latitude},{obj.longitude}"
+        return google_maps_url(obj.latitude, obj.longitude, obj.name, obj.address, obj.city)
 
     def create(self, validated_data):
         labels = validated_data.pop("facility_labels", [])
@@ -359,6 +358,8 @@ class ComplaintSerializer(serializers.ModelSerializer):
     aging_days = serializers.IntegerField(read_only=True, allow_null=True)
     is_overdue = serializers.BooleanField(read_only=True)
     estimation_reviewed_by_name = serializers.SerializerMethodField()
+    pump_address = serializers.CharField(source="pump.address", read_only=True)
+    pump_maps_url = serializers.SerializerMethodField()
     media = ComplaintMediaSerializer(many=True, read_only=True)
     feedback = ComplaintFeedbackSerializer(read_only=True)
     history = StatusHistorySerializer(many=True, read_only=True)
@@ -373,6 +374,8 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "pump",
             "pump_name",
             "pump_code",
+            "pump_address",
+            "pump_maps_url",
             "sales_area_label",
             "submitted_by",
             "submitted_by_name",
@@ -398,6 +401,7 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "estimation_reviewed_by_name",
             "estimation_reviewed_at",
             "estimation_review_note",
+            "po_number",
             "sla_hours",
             "aging_hours",
             "aging_days",
@@ -451,6 +455,10 @@ class ComplaintSerializer(serializers.ModelSerializer):
             return None
         return user.get_full_name() or user.username
 
+    def get_pump_maps_url(self, obj):
+        pump = obj.pump
+        return google_maps_url(pump.latitude, pump.longitude, pump.name, pump.address, pump.city)
+
     def validate(self, attrs):
         category = attrs.get("category") or getattr(self.instance, "category", None)
         if category == Complaint.Category.DU:
@@ -475,6 +483,8 @@ class ComplaintSerializer(serializers.ModelSerializer):
             data["estimation_reviewed_by_name"] = None
             data["estimation_reviewed_at"] = None
             data["estimation_review_note"] = ""
+            data["po_number"] = ""
+            data["media"] = [m for m in (data.get("media") or []) if m.get("kind") != "QUOTATION"]
         return data
 
     def create(self, validated_data):
@@ -588,9 +598,7 @@ class RegistrationRequestSerializer(serializers.ModelSerializer):
         return dict(ConsumerPump.AmcType.choices).get(obj.amc_type, obj.amc_type or "")
 
     def get_maps_url(self, obj):
-        if obj.latitude is None or obj.longitude is None:
-            return ""
-        return f"https://www.google.com/maps?q={obj.latitude},{obj.longitude}"
+        return google_maps_url(obj.latitude, obj.longitude, obj.organization_name, obj.address, obj.city)
 
 
 class NotificationSerializer(serializers.ModelSerializer):

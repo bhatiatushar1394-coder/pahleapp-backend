@@ -98,6 +98,11 @@ def scoped_pumps(user):
         )
     if user.role == User.Role.CP_USER and user.consumer_pump_id:
         return qs.filter(id=user.consumer_pump_id)
+    if user.role == User.Role.VENDOR:
+        profile = getattr(user, "vendor_profile", None)
+        if not profile:
+            return qs.none()
+        return qs.filter(complaints__assigned_vendor=profile).distinct()
     return qs.none()
 
 
@@ -633,6 +638,8 @@ class ComplaintViewSet(viewsets.ModelViewSet):
             complaint.estimation_reviewed_by = None
             complaint.estimation_reviewed_at = None
             complaint.estimation_review_note = ""
+            complaint.po_number = ""
+            ComplaintMedia.objects.filter(complaint=complaint, kind=ComplaintMedia.Kind.QUOTATION).delete()
         complaint.save()
         if reassign and previous and previous.user:
             notify(
@@ -787,6 +794,15 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         complaint.estimation_reviewed_at = None
         complaint.estimation_review_note = ""
         complaint.save()
+        quotation = request.FILES.get("quotation")
+        if quotation:
+            ComplaintMedia.objects.filter(complaint=complaint, kind=ComplaintMedia.Kind.QUOTATION).delete()
+            ComplaintMedia.objects.create(
+                complaint=complaint,
+                kind=ComplaintMedia.Kind.QUOTATION,
+                file=quotation,
+                uploaded_by=request.user,
+            )
         transition(
             complaint,
             Complaint.Status.ESTIMATION_PENDING,
@@ -802,11 +818,57 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         complaint = self.get_object()
         if complaint.status != Complaint.Status.ESTIMATION_PENDING:
             return Response({"detail": "No estimation is waiting for approval."}, status=400)
+        po_number = (request.data.get("po_number") or "").strip()
+        if not po_number:
+            return Response({"detail": "Enter the PO number before approving the estimation."}, status=400)
         complaint.estimation_reviewed_by = request.user
         complaint.estimation_reviewed_at = timezone.now()
         complaint.estimation_review_note = (request.data.get("note") or "").strip()
+        complaint.po_number = po_number
         complaint.save()
-        transition(complaint, Complaint.Status.ESTIMATION_APPROVED, request.user, "Estimation approved")
+        transition(complaint, Complaint.Status.ESTIMATION_APPROVED, request.user, f"Estimation approved · PO {po_number}")
+        return Response(self.get_serializer(complaint).data)
+
+    @action(detail=True, methods=["post"], url_path="set-po")
+    def set_po(self, request, pk=None):
+        if request.user.role not in OFFICER_ROLES:
+            return Response({"detail": "Only an officer can issue a PO number."}, status=403)
+        complaint = self.get_object()
+        po_number = (request.data.get("po_number") or "").strip()
+        if not po_number:
+            return Response({"detail": "Enter the PO number."}, status=400)
+        complaint.po_number = po_number
+        complaint.save(update_fields=["po_number", "updated_at"])
+        return Response(self.get_serializer(complaint).data)
+
+    @action(detail=True, methods=["post"], url_path="officer-close")
+    def officer_close(self, request, pk=None):
+        if request.user.role not in OFFICER_ROLES:
+            return Response({"detail": "Only an officer can close this without customer confirmation."}, status=403)
+        complaint = self.get_object()
+        if complaint.status not in (
+            Complaint.Status.WORK_COMPLETION,
+            Complaint.Status.USER_CONFIRMATION,
+        ):
+            return Response({"detail": "Officer can close only after the vendor has marked work complete."}, status=400)
+        remarks = (request.data.get("remarks") or "").strip() or "Closed by officer — customer did not verify resolution."
+        ComplaintFeedback.objects.update_or_create(
+            complaint=complaint,
+            defaults={
+                "resolved": True,
+                "rating": int(request.data.get("rating") or 5),
+                "remarks": remarks,
+                "submitted_by": request.user,
+            },
+        )
+        transition(
+            complaint,
+            Complaint.Status.USER_CONFIRMATION,
+            request.user,
+            "Officer confirmed in place of customer",
+            notify=False,
+        )
+        transition(complaint, Complaint.Status.CLOSED, request.user, remarks)
         return Response(self.get_serializer(complaint).data)
 
     @action(detail=True, methods=["post"], url_path="reject-estimation")
@@ -1051,6 +1113,7 @@ def reports_export(request):
                 "DU Sr. No.",
                 "Issue",
                 "Vendor",
+                "PO Number",
                 "Aging Days",
                 "Status",
                 "User Rating",
@@ -1071,6 +1134,7 @@ def reports_export(request):
                     c.du_serial,
                     c.specific_problem,
                     c.assigned_vendor.name if c.assigned_vendor else "Unassigned",
+                    c.po_number,
                     c.aging_days if c.aging_days is not None else "",
                     c.get_status_display(),
                     rating,

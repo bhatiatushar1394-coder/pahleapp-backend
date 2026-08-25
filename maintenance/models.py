@@ -177,6 +177,7 @@ class Complaint(models.Model):
     )
     estimation_reviewed_at = models.DateTimeField(null=True, blank=True)
     estimation_review_note = models.TextField(blank=True)
+    po_number = models.CharField("PO number", max_length=64, blank=True)
     sla_hours = models.PositiveIntegerField(default=48)
     last_reminded_at = models.DateTimeField(null=True, blank=True)
     escalated_at = models.DateTimeField(null=True, blank=True)
@@ -223,6 +224,7 @@ class ComplaintMedia(models.Model):
         AFTER_PROOF = "AFTER_PROOF", "After Proof"
         CERTIFICATE = "CERTIFICATE", "Work Completion Certificate"
         VIDEO = "VIDEO", "Video"
+        QUOTATION = "QUOTATION", "Vendor Quotation"
 
     complaint = models.ForeignKey(Complaint, on_delete=models.CASCADE, related_name="media")
     kind = models.CharField(max_length=32, choices=Kind.choices)

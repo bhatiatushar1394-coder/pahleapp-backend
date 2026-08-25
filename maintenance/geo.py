@@ -1,5 +1,6 @@
 import re
 from decimal import Decimal, InvalidOperation
+from urllib.parse import quote_plus
 
 COORD_RE = re.compile(
     r"@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)"
@@ -28,3 +29,13 @@ def parse_coordinates(raw="", latitude=None, longitude=None):
         return None
     quant = Decimal("0.0000001")
     return lat.quantize(quant), lng.quantize(quant)
+
+
+def google_maps_url(latitude=None, longitude=None, *place_parts):
+    """Pin by coordinates when present; otherwise search Google Maps by address."""
+    if latitude is not None and longitude is not None:
+        return f"https://www.google.com/maps?q={latitude},{longitude}"
+    query = " ".join(str(part).strip() for part in place_parts if part and str(part).strip())
+    if not query:
+        return ""
+    return f"https://www.google.com/maps/search/?api=1&query={quote_plus(query)}"
