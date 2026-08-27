@@ -91,10 +91,10 @@ class Command(BaseCommand):
         do_lko = DivisionalOffice.objects.create(code="DO-LKO", name="DO Lucknow")
 
         sa1 = SalesArea.objects.create(
-            code="LKO-I", name="Lucknow I RSA", zone="Lucknow", divisional_office=do_lko
+            code="LKO-I", name="Lucknow I IBSA", zone="Lucknow", divisional_office=do_lko
         )
         sa2 = SalesArea.objects.create(
-            code="LKO-III", name="Lucknow III RSA", zone="Lucknow", divisional_office=do_lko
+            code="LKO-III", name="Lucknow III IBSA", zone="Lucknow", divisional_office=do_lko
         )
 
         himanshu = user(
