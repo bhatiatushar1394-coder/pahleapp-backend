@@ -3,6 +3,7 @@ from decimal import Decimal, InvalidOperation
 from io import StringIO
 
 from django.contrib.auth.hashers import make_password
+from django.db import connection
 from django.db.models import Avg, Count, Q
 from django.http import HttpResponse
 from django.utils import timezone
@@ -157,7 +158,13 @@ def assistant_chat_view(request):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def health_view(request):
-    return Response({"status": "ok"})
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+    except Exception:
+        return Response({"status": "error", "db": "down"}, status=503)
+    return Response({"status": "ok", "db": "ok"})
 
 
 @api_view(["POST"])
