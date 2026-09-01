@@ -155,7 +155,7 @@ def assistant_chat_view(request):
     return Response(result)
 
 
-@api_view(["GET"])
+@api_view(["GET", "HEAD"])
 @permission_classes([AllowAny])
 def health_view(request):
     try:
