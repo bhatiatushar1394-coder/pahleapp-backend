@@ -9,6 +9,7 @@ from .models import (
     ComplaintMedia,
     ConsumerPump,
     DivisionalOffice,
+    JobCompletionCertificate,
     PumpFacility,
     RegistrationRequest,
     SalesArea,
@@ -344,6 +345,72 @@ class VendorSiteIssueSerializer(serializers.ModelSerializer):
         return file_public_url(obj.photo, self.context.get("request"))
 
 
+class JobCompletionCertificateSerializer(serializers.ModelSerializer):
+    stage_label = serializers.CharField(source="get_stage_display", read_only=True)
+    signature_url = serializers.SerializerMethodField()
+    uploaded_pdf_url = serializers.SerializerMethodField()
+    generated_pdf_url = serializers.SerializerMethodField()
+    pdf_url = serializers.SerializerMethodField()
+    prepared_by_name = serializers.SerializerMethodField()
+    signed_by_name = serializers.SerializerMethodField()
+    bill_submitted_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = JobCompletionCertificate
+        fields = [
+            "id",
+            "stage",
+            "stage_label",
+            "certificate_date",
+            "vendor_name",
+            "vendor_address",
+            "nature_of_job",
+            "customer_name",
+            "job_completion_date",
+            "work_satisfactory",
+            "signature_url",
+            "uploaded_pdf_url",
+            "generated_pdf_url",
+            "pdf_url",
+            "prepared_by_name",
+            "prepared_at",
+            "signed_by_name",
+            "signed_at",
+            "bill_submitted_by_name",
+            "bill_submitted_at",
+        ]
+
+    def _url(self, field):
+        return file_public_url(field, self.context.get("request"))
+
+    def get_signature_url(self, obj):
+        return self._url(obj.signature)
+
+    def get_uploaded_pdf_url(self, obj):
+        return self._url(obj.uploaded_pdf)
+
+    def get_generated_pdf_url(self, obj):
+        return self._url(obj.generated_pdf)
+
+    def get_pdf_url(self, obj):
+        return self._url(obj.generated_pdf) or self._url(obj.uploaded_pdf)
+
+    def get_prepared_by_name(self, obj):
+        if not obj.prepared_by:
+            return ""
+        return obj.prepared_by.get_full_name() or obj.prepared_by.username
+
+    def get_signed_by_name(self, obj):
+        if not obj.signed_by:
+            return ""
+        return obj.signed_by.get_full_name() or obj.signed_by.username
+
+    def get_bill_submitted_by_name(self, obj):
+        if not obj.bill_submitted_by:
+            return ""
+        return obj.bill_submitted_by.get_full_name() or obj.bill_submitted_by.username
+
+
 class ComplaintSerializer(serializers.ModelSerializer):
     pump_name = serializers.CharField(source="pump.name", read_only=True)
     pump_code = serializers.CharField(source="pump.pump_code", read_only=True)
@@ -365,6 +432,7 @@ class ComplaintSerializer(serializers.ModelSerializer):
     history = StatusHistorySerializer(many=True, read_only=True)
     site_issues = VendorSiteIssueSerializer(many=True, read_only=True)
     user_rating = serializers.SerializerMethodField()
+    job_certificate = serializers.SerializerMethodField()
 
     class Meta:
         model = Complaint
@@ -417,6 +485,7 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "history",
             "site_issues",
             "user_rating",
+            "job_certificate",
         ]
         read_only_fields = [
             "complaint_id",
@@ -458,6 +527,12 @@ class ComplaintSerializer(serializers.ModelSerializer):
     def get_pump_maps_url(self, obj):
         pump = obj.pump
         return google_maps_url(pump.latitude, pump.longitude, pump.name, pump.address, pump.city)
+
+    def get_job_certificate(self, obj):
+        cert = getattr(obj, "job_certificate", None)
+        if not cert:
+            return None
+        return JobCompletionCertificateSerializer(cert, context=self.context).data
 
     def validate(self, attrs):
         category = attrs.get("category") or getattr(self.instance, "category", None)

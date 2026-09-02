@@ -242,6 +242,43 @@ class ComplaintFeedback(models.Model):
     submitted_at = models.DateTimeField(auto_now_add=True)
 
 
+class JobCompletionCertificate(models.Model):
+    class Stage(models.TextChoices):
+        VENDOR_DRAFT = "VENDOR_DRAFT", "Vendor filled the form"
+        CUSTOMER_SIGNED = "CUSTOMER_SIGNED", "Customer signed"
+        BILL_SUBMITTED = "BILL_SUBMITTED", "Officer submitted the bill"
+
+    complaint = models.OneToOneField(Complaint, on_delete=models.CASCADE, related_name="job_certificate")
+    stage = models.CharField(max_length=32, choices=Stage.choices, default=Stage.VENDOR_DRAFT)
+    certificate_date = models.DateField()
+    vendor_name = models.CharField(max_length=200)
+    vendor_address = models.TextField(blank=True)
+    nature_of_job = models.CharField(max_length=255)
+    customer_name = models.CharField(max_length=200)
+    job_completion_date = models.DateField()
+    work_satisfactory = models.BooleanField(default=True)
+    signature = models.ImageField(upload_to="certificates/signatures/%Y/%m/", blank=True)
+    uploaded_pdf = models.FileField(upload_to="certificates/uploads/%Y/%m/", blank=True)
+    generated_pdf = models.FileField(upload_to="certificates/generated/%Y/%m/", blank=True)
+    prepared_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name="prepared_certificates"
+    )
+    prepared_at = models.DateTimeField(null=True, blank=True)
+    signed_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name="signed_certificates"
+    )
+    signed_at = models.DateTimeField(null=True, blank=True)
+    bill_submitted_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name="billed_certificates"
+    )
+    bill_submitted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.complaint.complaint_id} certificate ({self.stage})"
+
+
 class VendorSiteIssue(models.Model):
     class Kind(models.TextChoices):
         ACCESS = "ACCESS", "Site access / permission blocked"

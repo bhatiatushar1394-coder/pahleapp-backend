@@ -15,6 +15,7 @@ from .models import (
     RegistrationRequest,
     Notification,
     VendorSiteIssue,
+    JobCompletionCertificate,
 )
 
 
@@ -34,6 +35,7 @@ admin.site.register(Complaint)
 admin.site.register(ComplaintMedia)
 admin.site.register(ComplaintFeedback)
 admin.site.register(VendorSiteIssue)
+admin.site.register(JobCompletionCertificate)
 admin.site.register(StatusHistory)
 admin.site.register(RegistrationRequest)
 admin.site.register(Notification)

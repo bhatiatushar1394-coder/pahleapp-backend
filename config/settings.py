@@ -44,6 +44,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
+    "maintenance.db_guard.DatabaseUnavailableMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -80,17 +81,21 @@ _sqlite = {
     "NAME": BASE_DIR / "db.sqlite3",
 }
 _database_url = os.environ.get("DATABASE_URL", "").strip()
-if _database_url:
+_use_sqlite = os.environ.get("USE_SQLITE", "").lower() in ("1", "true", "yes")
+# Local and production both use Neon when DATABASE_URL is set.
+# USE_SQLITE=1 is the offline escape hatch only.
+if _database_url and not _use_sqlite:
     import dj_database_url
 
     DATABASES = {
         "default": dj_database_url.parse(
             _database_url,
-            conn_max_age=0,
+            conn_max_age=300 if DEBUG else 0,
             conn_health_checks=True,
             ssl_require=True,
         )
     }
+    DATABASES["default"]["ENGINE"] = "config.postgresql"
     DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
 else:
     DATABASES = {"default": _sqlite}

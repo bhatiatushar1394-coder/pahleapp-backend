@@ -30,6 +30,7 @@ from maintenance.models import (
     Vendor,
     Notification,
     VendorSiteIssue,
+    JobCompletionCertificate,
 )
 
 PASSWORD = "Pahle@123"
@@ -585,5 +586,65 @@ class Command(BaseCommand):
         from maintenance.ibsa import apply_ibsa_officers
 
         apply_ibsa_officers()
+
+        # Job Completion Certificate demo: 3 tickets waiting for the vendor to fill,
+        # 3 tickets filled by the vendor and waiting for the customer to sign.
+        cert_demo = [
+            (apex, p1, metro_user, himanshu, Complaint.Category.ELECTRICAL, "Canopy/Pole Light Issue (Illumination / wiring)", "Island 1 canopy lights failed after rain.", "Replaced 3 LED fittings; circuit restored.", False, 22, "9200.00"),
+            (apex, p1, metro_user, himanshu, Complaint.Category.DU, "DU related", "DU #2 meter mismatch of 0.3L per fill.", "Calibrated pulser and resealed meter.", False, 30, "14500.00"),
+            (build, p3, tech_user, priya, Complaint.Category.CIVIL, "Kerb wall repair/Painting", "Kerb wall at island 2 chipped.", "Patched kerb and completed two coats of paint.", False, 40, "18500.00"),
+            (apex, p1, metro_user, himanshu, Complaint.Category.ELECTRICAL, "Servo/CVT/Battery Issue (Voltage fluctuation / backup)", "CVT output dropping below 200V.", "Replaced 5KVA regulator; voltage set to 230V.", True, 26, "24800.00"),
+            (hydro, p2, national_user, priya, Complaint.Category.TANK, "Tank Leakage (Seepage / contamination risk)", "Fuel odor at Tank 1 manhole.", "Replaced nitrile seals; tightness test passed.", True, 34, "31200.00"),
+            (apex, p1, metro_user, himanshu, Complaint.Category.OTHER, "Any other issues (Pneumatic line, air compressor, CCTV, general)", "Island 2 CCTV blank.", "Re-terminated cameras; NVR recording restored.", True, 18, "6400.00"),
+        ]
+        for idx, (vendor, pump, submitter, officer, cat, problem, desc, remarks, filled, hours, amount) in enumerate(cert_demo, start=30):
+            ticket = Complaint.objects.create(
+                complaint_id=f"CMP-2026-{idx:03d}",
+                pump=pump,
+                submitted_by=submitter,
+                sales_officer=officer,
+                assigned_vendor=vendor,
+                category=cat,
+                specific_problem=problem,
+                description=desc,
+                priority=Complaint.Priority.HIGH,
+                status=Complaint.Status.WORK_COMPLETION,
+                officer_remarks="Attend and close with Job Completion Certificate.",
+                vendor_remarks=remarks,
+                estimation_remarks=remarks,
+                estimation_amount=Decimal(amount),
+                po_number=f"PO/LKO/2026/{idx:03d}",
+                sla_hours=SLA_HOURS[cat],
+                created_at=now - timedelta(hours=hours),
+            )
+            add_history(
+                ticket,
+                [
+                    (Complaint.Status.SUBMITTED, "Complaint lodged", now - timedelta(hours=hours)),
+                    (Complaint.Status.ASSIGNED_TO_OFFICER, "Auto-mapped", now - timedelta(hours=hours)),
+                    (Complaint.Status.ASSIGNED_TO_VENDOR, f"Assigned {vendor.name}", now - timedelta(hours=hours - 4)),
+                    (Complaint.Status.VENDOR_ACKNOWLEDGED, "Ack", now - timedelta(hours=hours - 6)),
+                    (Complaint.Status.WORK_IN_PROGRESS, "Work started", now - timedelta(hours=hours - 14)),
+                    (Complaint.Status.WORK_COMPLETION, "Work completed", now - timedelta(hours=2)),
+                ],
+                officer,
+            )
+            attach_proof(ticket, submitter, ComplaintMedia.Kind.USER_PHOTO, "User photo", (0, 48, 135))
+            attach_proof(ticket, vendor.user, ComplaintMedia.Kind.BEFORE_PROOF, "Before proof", (212, 85, 18))
+            attach_proof(ticket, vendor.user, ComplaintMedia.Kind.AFTER_PROOF, "After proof", (3, 48, 135))
+            if filled:
+                JobCompletionCertificate.objects.create(
+                    complaint=ticket,
+                    stage=JobCompletionCertificate.Stage.VENDOR_DRAFT,
+                    certificate_date=timezone.localdate(),
+                    vendor_name=vendor.name,
+                    vendor_address="Lucknow, Uttar Pradesh",
+                    nature_of_job=problem,
+                    customer_name=pump.name,
+                    job_completion_date=timezone.localdate(),
+                    work_satisfactory=True,
+                    prepared_by=vendor.user,
+                    prepared_at=now - timedelta(hours=1),
+                )
 
         self.stdout.write(self.style.SUCCESS("Seeded PAHLE-APP demo data. Password for all users: Pahle@123"))

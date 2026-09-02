@@ -16,12 +16,24 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from .constants import PROBLEM_MASTER, SLA_HOURS, STATUS_FLOW
 from .geo import parse_coordinates
+from .certificate import (
+    CERT_READY_STATUSES,
+    apply_letter_fields,
+    attach_certificate_media,
+    certificate_defaults,
+    customer_owns,
+    get_certificate,
+    get_or_create_draft,
+    save_generated_pdf,
+    vendor_owns,
+)
 from .models import (
     Complaint,
     ComplaintFeedback,
     ComplaintMedia,
     ConsumerPump,
     DivisionalOffice,
+    JobCompletionCertificate,
     Notification,
     RegistrationRequest,
     SalesArea,
@@ -65,6 +77,7 @@ def scoped_complaints(user):
         "assigned_vendor",
         "submitted_by",
         "feedback",
+        "job_certificate",
     ).prefetch_related("media", "history", "pump__facilities", "site_issues", "site_issues__reported_by")
     if user.role == User.Role.ADMIN:
         return qs
@@ -982,6 +995,147 @@ class ComplaintViewSet(viewsets.ModelViewSet):
             if avg:
                 vendor.rating = round(avg, 1)
                 vendor.save(update_fields=["rating"])
+        return Response(self.get_serializer(complaint).data)
+
+    def _certificate_ready(self, complaint):
+        if complaint.status not in CERT_READY_STATUSES:
+            return Response(
+                {"detail": "The Job Completion Certificate can be used after the vendor marks work complete."},
+                status=400,
+            )
+        return None
+
+    @action(detail=True, methods=["post"], url_path="certificate/prepare")
+    def prepare_certificate(self, request, pk=None):
+        complaint = self.get_object()
+        if not vendor_owns(request.user, complaint):
+            return Response({"detail": "Only the assigned vendor can fill this certificate."}, status=403)
+        blocked = self._certificate_ready(complaint)
+        if blocked:
+            return blocked
+        cert = get_certificate(complaint)
+        if cert and cert.stage != JobCompletionCertificate.Stage.VENDOR_DRAFT:
+            return Response({"detail": "This certificate is already signed and cannot be edited."}, status=400)
+        if not cert:
+            defaults = certificate_defaults(complaint)
+            cert = JobCompletionCertificate(complaint=complaint, **defaults)
+        apply_letter_fields(cert, request.data)
+        if not cert.vendor_name or not cert.nature_of_job or not cert.customer_name:
+            return Response(
+                {"detail": "Vendor name, nature of job, and customer name are required."},
+                status=400,
+            )
+        cert.stage = JobCompletionCertificate.Stage.VENDOR_DRAFT
+        cert.prepared_by = request.user
+        cert.prepared_at = timezone.now()
+        cert.save()
+        StatusHistory.objects.create(
+            complaint=complaint,
+            from_status=complaint.status,
+            to_status=complaint.status,
+            actor=request.user,
+            note="Vendor filled Job Completion Certificate",
+        )
+        recipients = [u for u in (complaint.submitted_by, complaint.sales_officer) if u]
+        notify(
+            recipients,
+            kind=Notification.Kind.STATUS,
+            title=f"{complaint.complaint_id} certificate ready to sign",
+            body="The vendor filled the Job Completion Certificate. The customer can sign it in the app.",
+            link=f"/complaints?q={complaint.complaint_id}",
+            complaint=complaint,
+            exclude=request.user,
+        )
+        return Response(self.get_serializer(complaint).data)
+
+    @action(detail=True, methods=["post"], url_path="certificate/sign")
+    def sign_certificate(self, request, pk=None):
+        complaint = self.get_object()
+        if not customer_owns(request.user, complaint):
+            return Response({"detail": "Only the customer for this pump can sign the certificate."}, status=403)
+        blocked = self._certificate_ready(complaint)
+        if blocked:
+            return blocked
+        cert = get_or_create_draft(complaint)
+        if cert.stage != JobCompletionCertificate.Stage.VENDOR_DRAFT:
+            return Response({"detail": "This certificate is already signed."}, status=400)
+        signature = request.FILES.get("signature")
+        uploaded_pdf = request.FILES.get("uploaded_pdf") or request.FILES.get("certificate")
+        if not signature and not uploaded_pdf:
+            return Response(
+                {"detail": "Draw a signature on the pad, or upload a signed PDF."},
+                status=400,
+            )
+        if signature:
+            cert.signature = signature
+        if uploaded_pdf:
+            cert.uploaded_pdf = uploaded_pdf
+        cert.signed_by = request.user
+        cert.signed_at = timezone.now()
+        cert.stage = JobCompletionCertificate.Stage.CUSTOMER_SIGNED
+        cert.save()
+        if signature and not uploaded_pdf:
+            save_generated_pdf(cert)
+            attach_certificate_media(complaint, cert.generated_pdf, request.user)
+        elif uploaded_pdf:
+            attach_certificate_media(complaint, cert.uploaded_pdf, request.user)
+        StatusHistory.objects.create(
+            complaint=complaint,
+            from_status=complaint.status,
+            to_status=complaint.status,
+            actor=request.user,
+            note="Customer signed Job Completion Certificate",
+        )
+        recipients = []
+        if complaint.sales_officer:
+            recipients.append(complaint.sales_officer)
+        if complaint.assigned_vendor and complaint.assigned_vendor.user:
+            recipients.append(complaint.assigned_vendor.user)
+        notify(
+            recipients,
+            kind=Notification.Kind.STATUS,
+            title=f"{complaint.complaint_id} certificate signed",
+            body="The customer signed the Job Completion Certificate. The officer can mark the bill submitted.",
+            link=f"/complaints?q={complaint.complaint_id}",
+            complaint=complaint,
+            exclude=request.user,
+        )
+        return Response(self.get_serializer(complaint).data)
+
+    @action(detail=True, methods=["post"], url_path="certificate/submit-bill")
+    def submit_certificate_bill(self, request, pk=None):
+        if request.user.role not in OFFICER_ROLES:
+            return Response({"detail": "Only an officer can mark the bill as submitted."}, status=403)
+        complaint = self.get_object()
+        cert = get_certificate(complaint)
+        if not cert:
+            return Response({"detail": "No Job Completion Certificate has been prepared yet."}, status=400)
+        if cert.stage == JobCompletionCertificate.Stage.VENDOR_DRAFT:
+            return Response({"detail": "The customer must sign the certificate before the bill can be submitted."}, status=400)
+        if cert.stage != JobCompletionCertificate.Stage.BILL_SUBMITTED:
+            cert.stage = JobCompletionCertificate.Stage.BILL_SUBMITTED
+            cert.bill_submitted_by = request.user
+            cert.bill_submitted_at = timezone.now()
+            cert.save(update_fields=["stage", "bill_submitted_by", "bill_submitted_at", "updated_at"])
+            StatusHistory.objects.create(
+                complaint=complaint,
+                from_status=complaint.status,
+                to_status=complaint.status,
+                actor=request.user,
+                note="Officer marked bill submitted against Job Completion Certificate",
+            )
+            recipients = []
+            if complaint.assigned_vendor and complaint.assigned_vendor.user:
+                recipients.append(complaint.assigned_vendor.user)
+            notify(
+                recipients,
+                kind=Notification.Kind.STATUS,
+                title=f"{complaint.complaint_id} bill submitted",
+                body="The officer marked the bill as submitted for this Job Completion Certificate.",
+                link=f"/complaints?q={complaint.complaint_id}",
+                complaint=complaint,
+                exclude=request.user,
+            )
         return Response(self.get_serializer(complaint).data)
 
     @action(detail=True, methods=["post"])
