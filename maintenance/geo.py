@@ -7,6 +7,11 @@ COORD_RE = re.compile(
     r"|(-?\d+(?:\.\d+)?)\s*[,/\s]\s*(-?\d+(?:\.\d+)?)"
 )
 
+# Exact pins so Google Maps opens the point, not a text search.
+KNOWN_MAP_PINS = {
+    "supply depot lucknow": (Decimal("26.825374"), Decimal("80.950264")),
+}
+
 
 def parse_coordinates(raw="", latitude=None, longitude=None):
     lat = lng = None
@@ -31,10 +36,26 @@ def parse_coordinates(raw="", latitude=None, longitude=None):
     return lat.quantize(quant), lng.quantize(quant)
 
 
+def _known_pin(*place_parts):
+    blob = " ".join(str(part).strip() for part in place_parts if part and str(part).strip()).lower()
+    for key, coords in KNOWN_MAP_PINS.items():
+        if key in blob:
+            return coords
+    return None
+
+
 def google_maps_url(latitude=None, longitude=None, *place_parts):
-    """Pin by coordinates when present; otherwise search Google Maps by address."""
-    if latitude is not None and longitude is not None:
-        return f"https://www.google.com/maps?q={latitude},{longitude}"
+    """Open the exact map pin. Never fall back to a place-name search when a pin is known."""
+    parsed = parse_coordinates(latitude=latitude, longitude=longitude)
+    if not parsed:
+        parsed = _known_pin(*place_parts)
+    if parsed:
+        lat = f"{float(parsed[0]):.6f}"
+        lng = f"{float(parsed[1]):.6f}"
+        return (
+            f"https://www.google.com/maps/place/{lat},{lng}"
+            f"/@{lat},{lng},17z/data=!3m1!4b1!4m4!3m3!8m2!3d{lat}!4d{lng}"
+        )
     query = " ".join(str(part).strip() for part in place_parts if part and str(part).strip())
     if not query:
         return ""

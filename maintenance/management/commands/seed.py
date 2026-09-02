@@ -160,6 +160,11 @@ class Command(BaseCommand):
                     sales_area=area,
                     sales_officer=so,
                     engineering_officer=eo,
+                    **(
+                        {"latitude": "26.825374", "longitude": "80.950264"}
+                        if name == "Supply Depot Lucknow"
+                        else {}
+                    ),
                 )
             )
         p1, p2, p3, p4, p5 = pumps

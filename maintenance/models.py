@@ -229,6 +229,7 @@ class ComplaintMedia(models.Model):
     complaint = models.ForeignKey(Complaint, on_delete=models.CASCADE, related_name="media")
     kind = models.CharField(max_length=32, choices=Kind.choices)
     file = models.FileField(upload_to="complaints/%Y/%m/")
+    preview = models.ImageField(upload_to="complaints/previews/%Y/%m/", blank=True)
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 

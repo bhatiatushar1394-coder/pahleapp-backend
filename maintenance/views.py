@@ -447,17 +447,15 @@ def dashboard_view(request):
             aging_buckets[">48h"] += 1
 
     area_pendency = []
-    for area in SalesArea.objects.select_related("divisional_office"):
-        area_qs = active.filter(pump__sales_area=area)
-        if not area_qs.exists() and request.user.role != User.Role.ADMIN:
-            continue
-        area_pendency.append(
-            {
-                "area": f"{area.code} {area.name}",
-                "do": area.divisional_office.name,
-                "pending": area_qs.count(),
-            }
-        )
+    chart_areas = [
+        (("LKO-1-IBSA", "LKO-I"), "Lucknow-I-IBSA"),
+        (("LKO-2-IBSA", "LKO-III"), "Lucknow-II-IBSA"),
+        (("KNP-IBSA",), "Kanpur-IBSA"),
+        (("GKP-IBSA",), "Gorakhpur-IBSA"),
+    ]
+    for codes, label in chart_areas:
+        pending = active.filter(pump__sales_area__code__in=codes).count()
+        area_pendency.append({"area": label, "do": "", "pending": pending})
 
     priority = (
         active.filter(

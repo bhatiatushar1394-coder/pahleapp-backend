@@ -15,7 +15,11 @@ class DatabaseStorage(Storage):
             data = b"".join(chunk for chunk in content.chunks())
         else:
             data = content.read()
-        content_type = getattr(content, "content_type", None) or "application/octet-stream"
+        content_type = getattr(content, "content_type", None) or ""
+        if not content_type or content_type == "application/octet-stream":
+            import mimetypes
+
+            content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
         StoredFile.objects.update_or_create(
             path=name,
             defaults={"data": data, "content_type": content_type, "size": len(data)},

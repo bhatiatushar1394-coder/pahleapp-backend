@@ -235,7 +235,7 @@ class ConsumerPumpSerializer(serializers.ModelSerializer):
         return obj.complaints.exclude(status=Complaint.Status.CLOSED).count()
 
     def get_maps_url(self, obj):
-        return google_maps_url(obj.latitude, obj.longitude, obj.name, obj.address, obj.city)
+        return google_maps_url(obj.latitude, obj.longitude, obj.name, obj.address, obj.city, obj.pump_code)
 
     def create(self, validated_data):
         labels = validated_data.pop("facility_labels", [])
@@ -298,13 +298,22 @@ class VendorSerializer(serializers.ModelSerializer):
 
 class ComplaintMediaSerializer(serializers.ModelSerializer):
     url = serializers.SerializerMethodField()
+    preview_url = serializers.SerializerMethodField()
 
     class Meta:
         model = ComplaintMedia
-        fields = ["id", "kind", "url", "uploaded_at"]
+        fields = ["id", "kind", "url", "preview_url", "uploaded_at"]
 
     def get_url(self, obj):
         return file_public_url(obj.file, self.context.get("request"))
+
+    def get_preview_url(self, obj):
+        from .media_preview import ensure_media_preview, is_image_name
+
+        if obj.file and is_image_name(obj.file.name):
+            return file_public_url(obj.file, self.context.get("request"))
+        ensure_media_preview(obj)
+        return file_public_url(obj.preview, self.context.get("request"))
 
 
 class ComplaintFeedbackSerializer(serializers.ModelSerializer):
@@ -438,6 +447,11 @@ class ComplaintSerializer(serializers.ModelSerializer):
     site_issues = VendorSiteIssueSerializer(many=True, read_only=True)
     user_rating = serializers.SerializerMethodField()
     job_certificate = serializers.SerializerMethodField()
+    customer_contact_name = serializers.SerializerMethodField()
+    customer_contact_phone = serializers.SerializerMethodField()
+    vendor_contact_name = serializers.SerializerMethodField()
+    vendor_contact_phone = serializers.SerializerMethodField()
+    contacts_visible = serializers.SerializerMethodField()
 
     class Meta:
         model = Complaint
@@ -491,6 +505,11 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "site_issues",
             "user_rating",
             "job_certificate",
+            "customer_contact_name",
+            "customer_contact_phone",
+            "vendor_contact_name",
+            "vendor_contact_phone",
+            "contacts_visible",
         ]
         read_only_fields = [
             "complaint_id",
@@ -531,13 +550,51 @@ class ComplaintSerializer(serializers.ModelSerializer):
 
     def get_pump_maps_url(self, obj):
         pump = obj.pump
-        return google_maps_url(pump.latitude, pump.longitude, pump.name, pump.address, pump.city)
+        return google_maps_url(pump.latitude, pump.longitude, pump.name, pump.address, pump.city, pump.pump_code)
 
     def get_job_certificate(self, obj):
         cert = getattr(obj, "job_certificate", None)
         if not cert:
             return None
         return JobCompletionCertificateSerializer(cert, context=self.context).data
+
+    def _contacts_unlocked(self, obj):
+        return obj.status in {
+            Complaint.Status.VENDOR_ACKNOWLEDGED,
+            Complaint.Status.ESTIMATION_PENDING,
+            Complaint.Status.ESTIMATION_APPROVED,
+            Complaint.Status.WORK_IN_PROGRESS,
+            Complaint.Status.WORK_COMPLETION,
+            Complaint.Status.USER_CONFIRMATION,
+            Complaint.Status.CLOSED,
+        }
+
+    def get_contacts_visible(self, obj):
+        return self._contacts_unlocked(obj)
+
+    def get_customer_contact_name(self, obj):
+        if not self._contacts_unlocked(obj):
+            return ""
+        return obj.submitted_by.get_full_name() or obj.submitted_by.username
+
+    def get_customer_contact_phone(self, obj):
+        if not self._contacts_unlocked(obj):
+            return ""
+        return (obj.submitted_by.phone or "").strip()
+
+    def get_vendor_contact_name(self, obj):
+        if not self._contacts_unlocked(obj) or not obj.assigned_vendor:
+            return ""
+        return obj.assigned_vendor.name or ""
+
+    def get_vendor_contact_phone(self, obj):
+        if not self._contacts_unlocked(obj) or not obj.assigned_vendor:
+            return ""
+        vendor = obj.assigned_vendor
+        phone = (vendor.phone or "").strip()
+        if not phone and vendor.user_id:
+            phone = (vendor.user.phone or "").strip()
+        return phone
 
     def validate(self, attrs):
         category = attrs.get("category") or getattr(self.instance, "category", None)
