@@ -80,6 +80,11 @@ class UserPublicSerializer(serializers.ModelSerializer):
         return obj.get_full_name() or obj.username
 
     def get_sales_area_label(self, obj):
+        if obj.role in (User.Role.ADMIN, User.Role.DO_OFFICER) and obj.divisional_office:
+            name = (obj.divisional_office.name or "").strip()
+            if name.upper().startswith("DO "):
+                return f"{name[3:].strip()} DO"
+            return name
         if not obj.sales_area:
             return ""
         return f"{obj.sales_area.code} {obj.sales_area.name} ({obj.sales_area.divisional_office.name})"

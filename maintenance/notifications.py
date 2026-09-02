@@ -180,6 +180,32 @@ def complaint_officers(complaint):
     return users
 
 
+def notify_certificate(complaint, actor, headline, detail):
+    cid = complaint.complaint_id
+    pump = complaint.pump.name if getattr(complaint, "pump", None) else ""
+    problem = getattr(complaint, "specific_problem", "") or ""
+    body = (
+        f"Complaint ID: {cid}\n"
+        f"Location: {pump}\n"
+        f"Job: {problem}\n"
+        f"Status: {headline}\n\n"
+        f"{detail}"
+    )
+    users = [*complaint_officers(complaint), *cp_watchers(complaint)]
+    vendor = vendor_login(complaint)
+    if vendor:
+        users.append(vendor)
+    notify(
+        users,
+        kind=Notification.Kind.STATUS,
+        title=f"{cid} updated to {headline}",
+        body=body,
+        link=complaint_link(complaint),
+        complaint=complaint,
+        exclude=actor,
+    )
+
+
 def notify_escalation(complaint, actor, note):
     cid = complaint.complaint_id
     notify(

@@ -17,18 +17,39 @@ def today_local():
     return timezone.localdate()
 
 
+def last_vendor_address(vendor):
+    if not vendor:
+        return ""
+    prior = (
+        JobCompletionCertificate.objects.filter(complaint__assigned_vendor=vendor)
+        .exclude(vendor_address="")
+        .order_by("-id")
+        .values_list("vendor_address", flat=True)
+        .first()
+    )
+    return prior or ""
+
+
 def certificate_defaults(complaint):
     vendor = complaint.assigned_vendor
     nature = (complaint.specific_problem or "").strip() or complaint.get_category_display()
     return {
         "certificate_date": today_local(),
         "vendor_name": (vendor.name if vendor else "") or "",
-        "vendor_address": "",
+        "vendor_address": last_vendor_address(vendor),
         "nature_of_job": nature[:255],
         "customer_name": complaint.pump.name if complaint.pump_id else "",
         "job_completion_date": today_local(),
         "work_satisfactory": True,
     }
+
+
+def refresh_draft_from_complaint(cert, complaint):
+    if cert.stage != JobCompletionCertificate.Stage.VENDOR_DRAFT:
+        return
+    defaults = certificate_defaults(complaint)
+    address = cert.vendor_address or defaults["vendor_address"]
+    apply_letter_fields(cert, {**defaults, "vendor_address": address})
 
 
 def parse_date(value, fallback):
@@ -94,6 +115,16 @@ def customer_owns(user, complaint):
     return user.role == User.Role.CP_USER and (
         complaint.submitted_by_id == user.id or complaint.pump_id == user.consumer_pump_id
     )
+
+
+def is_signature_image(uploaded):
+    if not uploaded:
+        return False
+    name = (getattr(uploaded, "name", "") or "").lower()
+    ctype = (getattr(uploaded, "content_type", "") or "").lower()
+    if ctype.startswith("image/"):
+        return True
+    return name.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
 
 
 def save_generated_pdf(cert):

@@ -24,6 +24,8 @@ from .certificate import (
     customer_owns,
     get_certificate,
     get_or_create_draft,
+    is_signature_image,
+    refresh_draft_from_complaint,
     save_generated_pdf,
     vendor_owns,
 )
@@ -44,6 +46,7 @@ from .models import (
 )
 from .notifications import (
     notify,
+    notify_certificate,
     notify_escalation,
     notify_new_complaint,
     notify_registration,
@@ -1036,15 +1039,11 @@ class ComplaintViewSet(viewsets.ModelViewSet):
             actor=request.user,
             note="Vendor filled Job Completion Certificate",
         )
-        recipients = [u for u in (complaint.submitted_by, complaint.sales_officer) if u]
-        notify(
-            recipients,
-            kind=Notification.Kind.STATUS,
-            title=f"{complaint.complaint_id} certificate ready to sign",
-            body="The vendor filled the Job Completion Certificate. The customer can sign it in the app.",
-            link=f"/complaints?q={complaint.complaint_id}",
-            complaint=complaint,
-            exclude=request.user,
+        notify_certificate(
+            complaint,
+            request.user,
+            "Completion certificate ready",
+            "The vendor filled the Job Completion Certificate. The customer can sign it in PAHLE-APP.",
         )
         return Response(self.get_serializer(complaint).data)
 
@@ -1059,11 +1058,16 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         cert = get_or_create_draft(complaint)
         if cert.stage != JobCompletionCertificate.Stage.VENDOR_DRAFT:
             return Response({"detail": "This certificate is already signed."}, status=400)
+        refresh_draft_from_complaint(cert, complaint)
         signature = request.FILES.get("signature")
         uploaded_pdf = request.FILES.get("uploaded_pdf") or request.FILES.get("certificate")
+        if uploaded_pdf and is_signature_image(uploaded_pdf):
+            if not signature:
+                signature = uploaded_pdf
+            uploaded_pdf = None
         if not signature and not uploaded_pdf:
             return Response(
-                {"detail": "Draw a signature on the pad, or upload a signed PDF."},
+                {"detail": "Draw a signature, upload a signature image, or upload a signed PDF."},
                 status=400,
             )
         if signature:
@@ -1074,7 +1078,7 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         cert.signed_at = timezone.now()
         cert.stage = JobCompletionCertificate.Stage.CUSTOMER_SIGNED
         cert.save()
-        if signature and not uploaded_pdf:
+        if cert.signature:
             save_generated_pdf(cert)
             attach_certificate_media(complaint, cert.generated_pdf, request.user)
         elif uploaded_pdf:
@@ -1086,19 +1090,11 @@ class ComplaintViewSet(viewsets.ModelViewSet):
             actor=request.user,
             note="Customer signed Job Completion Certificate",
         )
-        recipients = []
-        if complaint.sales_officer:
-            recipients.append(complaint.sales_officer)
-        if complaint.assigned_vendor and complaint.assigned_vendor.user:
-            recipients.append(complaint.assigned_vendor.user)
-        notify(
-            recipients,
-            kind=Notification.Kind.STATUS,
-            title=f"{complaint.complaint_id} certificate signed",
-            body="The customer signed the Job Completion Certificate. The officer can mark the bill submitted.",
-            link=f"/complaints?q={complaint.complaint_id}",
-            complaint=complaint,
-            exclude=request.user,
+        notify_certificate(
+            complaint,
+            request.user,
+            "Completion doc signed",
+            "The customer signed the Job Completion Certificate. The officer can mark the bill as submitted.",
         )
         return Response(self.get_serializer(complaint).data)
 
@@ -1124,17 +1120,11 @@ class ComplaintViewSet(viewsets.ModelViewSet):
                 actor=request.user,
                 note="Officer marked bill submitted against Job Completion Certificate",
             )
-            recipients = []
-            if complaint.assigned_vendor and complaint.assigned_vendor.user:
-                recipients.append(complaint.assigned_vendor.user)
-            notify(
-                recipients,
-                kind=Notification.Kind.STATUS,
-                title=f"{complaint.complaint_id} bill submitted",
-                body="The officer marked the bill as submitted for this Job Completion Certificate.",
-                link=f"/complaints?q={complaint.complaint_id}",
-                complaint=complaint,
-                exclude=request.user,
+            notify_certificate(
+                complaint,
+                request.user,
+                "Bill submitted",
+                "The officer marked the bill as submitted against the signed Job Completion Certificate.",
             )
         return Response(self.get_serializer(complaint).data)
 
