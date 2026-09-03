@@ -1,8 +1,10 @@
 import mimetypes
+from io import BytesIO
 from pathlib import Path
+from urllib.parse import unquote
 
 from django.conf import settings
-from django.http import HttpResponse
+from django.http import FileResponse
 from django.views.static import serve as static_serve
 
 from .models import StoredFile
@@ -28,15 +30,23 @@ def _content_type(path, stored=""):
     return guessed or stored or "application/octet-stream"
 
 
+def _headers(response, filename):
+    response["Content-Disposition"] = f'inline; filename="{filename}"'
+    response["Cross-Origin-Resource-Policy"] = "cross-origin"
+    response["Cache-Control"] = "public, max-age=86400"
+    return response
+
+
 def serve_media(request, path):
+    path = unquote(path or "").lstrip("/")
     rec = StoredFile.objects.filter(path=path).first()
     filename = Path(path).name or "file"
     if rec:
-        response = HttpResponse(bytes(rec.data), content_type=_content_type(path, rec.content_type))
-        response["Cache-Control"] = "public, max-age=86400"
-        response["Content-Disposition"] = f'inline; filename="{filename}"'
-        return response
+        response = FileResponse(
+            BytesIO(bytes(rec.data)),
+            content_type=_content_type(path, rec.content_type),
+        )
+        return _headers(response, filename)
     response = static_serve(request, path, document_root=settings.MEDIA_ROOT)
     response["Content-Type"] = _content_type(path, response.get("Content-Type", ""))
-    response["Content-Disposition"] = f'inline; filename="{filename}"'
-    return response
+    return _headers(response, filename)
