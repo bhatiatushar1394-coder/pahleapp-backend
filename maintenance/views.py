@@ -1,6 +1,6 @@
 import csv
 from decimal import Decimal, InvalidOperation
-from io import StringIO
+from io import BytesIO, StringIO
 
 from django.contrib.auth.hashers import make_password
 from django.db import connection
@@ -14,7 +14,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .constants import PROBLEM_MASTER, SLA_HOURS, STATUS_FLOW
+from .constants import PROBLEM_MASTER, SLA_HOURS, STATUS_FLOW, normalize_subtype
 from .geo import parse_coordinates
 from .certificate import (
     CERT_READY_STATUSES,
@@ -121,6 +121,28 @@ def scoped_pumps(user):
             return qs.none()
         return qs.filter(complaints__assigned_vendor=profile).distinct()
     return qs.none()
+
+
+def _is_pdf_upload(upload):
+    name = (getattr(upload, "name", "") or "").lower()
+    ctype = (getattr(upload, "content_type", "") or "").lower()
+    return name.endswith(".pdf") or ctype == "application/pdf"
+
+
+def _save_po_copy(complaint, request):
+    upload = request.FILES.get("po_file") or request.FILES.get("po")
+    if not upload:
+        return None
+    if not _is_pdf_upload(upload):
+        return Response({"detail": "Upload the PO copy as a PDF."}, status=400)
+    ComplaintMedia.objects.filter(complaint=complaint, kind=ComplaintMedia.Kind.PO).delete()
+    ComplaintMedia.objects.create(
+        complaint=complaint,
+        kind=ComplaintMedia.Kind.PO,
+        file=upload,
+        uploaded_by=request.user,
+    )
+    return None
 
 
 def transition(complaint, to_status, actor, note="", notify=True):
@@ -733,8 +755,15 @@ class ComplaintViewSet(viewsets.ModelViewSet):
             complaint.description = str(description).strip() or complaint.description
         if category and category in Complaint.Category.values:
             complaint.category = category
-            complaint.specific_problem = complaint.get_category_display()
             complaint.sla_hours = SLA_HOURS.get(category, complaint.sla_hours)
+        specific = request.data.get("specific_problem")
+        if specific is not None or category:
+            try:
+                complaint.specific_problem = normalize_subtype(
+                    complaint.category, specific, existing=complaint.specific_problem
+                )
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=400)
         if complaint.category == Complaint.Category.DU:
             for field in ("du_make", "du_model", "du_serial"):
                 if request.data.get(field) is not None:
@@ -842,6 +871,9 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         po_number = (request.data.get("po_number") or "").strip()
         if not po_number:
             return Response({"detail": "Enter the PO number before approving the estimation."}, status=400)
+        saved = _save_po_copy(complaint, request)
+        if saved is not None:
+            return saved
         complaint.estimation_reviewed_by = request.user
         complaint.estimation_reviewed_at = timezone.now()
         complaint.estimation_review_note = (request.data.get("note") or "").strip()
@@ -858,6 +890,9 @@ class ComplaintViewSet(viewsets.ModelViewSet):
         po_number = (request.data.get("po_number") or "").strip()
         if not po_number:
             return Response({"detail": "Enter the PO number."}, status=400)
+        saved = _save_po_copy(complaint, request)
+        if saved is not None:
+            return saved
         complaint.po_number = po_number
         complaint.save(update_fields=["po_number", "updated_at"])
         return Response(self.get_serializer(complaint).data)
@@ -1244,50 +1279,85 @@ def reports_export(request):
         qs = qs.filter(created_at__date__gte=request.GET["from"])
     if request.GET.get("to"):
         qs = qs.filter(created_at__date__lte=request.GET["to"])
+    qs = qs.prefetch_related("history")
 
-    fmt = request.GET.get("format", "json")
-    if fmt == "csv":
+    kind = (request.GET.get("export") or request.GET.get("download") or "").lower()
+    headers = [
+        "Complaint ID",
+        "Date",
+        "Consumer Pump",
+        "Area & DO",
+        "Category",
+        "Sub-category",
+        "DU Make",
+        "DU Model",
+        "DU Sr. No.",
+        "Vendor",
+        "PO Number",
+        "Aging Days",
+        "Status",
+        "User Rating",
+    ]
+
+    def row_for(c):
+        area = c.pump.sales_area
+        rating = getattr(getattr(c, "feedback", None), "rating", "")
+        return [
+            c.complaint_id,
+            timezone.localtime(c.created_at).strftime("%Y-%m-%d %H:%M"),
+            c.pump.name,
+            f"{area.code} {area.name} ({area.divisional_office.name})",
+            c.get_category_display(),
+            c.specific_problem,
+            c.du_make,
+            c.du_model,
+            c.du_serial,
+            c.assigned_vendor.name if c.assigned_vendor else "Unassigned",
+            c.po_number,
+            c.aging_days if c.aging_days is not None else "",
+            c.get_status_display(),
+            rating,
+        ]
+
+    if kind in ("xlsx", "excel", "xls"):
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font, PatternFill
+        from openpyxl.utils import get_column_letter
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Complaints"
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill("solid", fgColor="003087")
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", wrap_text=True)
+        for c in qs.select_related(
+            "pump", "pump__sales_area", "pump__sales_area__divisional_office", "assigned_vendor", "feedback"
+        ):
+            ws.append(row_for(c))
+        widths = [16, 18, 28, 36, 18, 24, 14, 14, 14, 28, 18, 12, 22, 12]
+        for idx, width in enumerate(widths, start=1):
+            ws.column_dimensions[get_column_letter(idx)].width = width
+        ws.auto_filter.ref = ws.dimensions
+        ws.freeze_panes = "A2"
+        buf = BytesIO()
+        wb.save(buf)
+        response = HttpResponse(
+            buf.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="pahle-complaints.xlsx"'
+        return response
+
+    if kind == "csv":
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="pahle-complaints.csv"'
         writer = csv.writer(response)
-        writer.writerow(
-            [
-                "Complaint ID",
-                "Date",
-                "Consumer Pump",
-                "Area & DO",
-                "Category",
-                "DU Make",
-                "DU Model",
-                "DU Sr. No.",
-                "Issue",
-                "Vendor",
-                "PO Number",
-                "Aging Days",
-                "Status",
-                "User Rating",
-            ]
-        )
+        writer.writerow(headers)
         for c in qs:
-            area = c.pump.sales_area
-            rating = getattr(getattr(c, "feedback", None), "rating", "")
-            writer.writerow(
-                [
-                    c.complaint_id,
-                    c.created_at.strftime("%Y-%m-%d %H:%M"),
-                    c.pump.name,
-                    f"{area.code} {area.name} ({area.divisional_office.name})",
-                    c.get_category_display(),
-                    c.du_make,
-                    c.du_model,
-                    c.du_serial,
-                    c.specific_problem,
-                    c.assigned_vendor.name if c.assigned_vendor else "Unassigned",
-                    c.po_number,
-                    c.aging_days if c.aging_days is not None else "",
-                    c.get_status_display(),
-                    rating,
-                ]
-            )
+            writer.writerow(row_for(c))
         return response
     return Response(ComplaintSerializer(qs, many=True, context={"request": request}).data)

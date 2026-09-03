@@ -225,6 +225,7 @@ class ComplaintMedia(models.Model):
         CERTIFICATE = "CERTIFICATE", "Work Completion Certificate"
         VIDEO = "VIDEO", "Video"
         QUOTATION = "QUOTATION", "Vendor Quotation"
+        PO = "PO", "PO Copy"
 
     complaint = models.ForeignKey(Complaint, on_delete=models.CASCADE, related_name="media")
     kind = models.CharField(max_length=32, choices=Kind.choices)

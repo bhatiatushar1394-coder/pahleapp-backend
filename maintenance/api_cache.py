@@ -45,7 +45,12 @@ def _should_skip(request) -> bool:
     path = request.path
     if any(path.startswith(prefix) for prefix in SKIP_PREFIXES):
         return True
-    if path.startswith("/api/reports/") and "csv" in (request.GET.get("format") or "").lower():
+    if path.startswith("/api/reports/") and (request.GET.get("export") or request.GET.get("download") or "").lower() in (
+        "csv",
+        "xlsx",
+        "excel",
+        "xls",
+    ):
         return True
     return False
 

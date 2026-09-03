@@ -1,9 +1,29 @@
 PROBLEM_MASTER = {
-    "TANK": ["Tank Related"],
-    "DU": ["DU related"],
-    "CIVIL": ["Civil Work"],
-    "ELECTRICAL": ["Electrical Work"],
-    "OTHER": ["Others"],
+    "TANK": [
+        "Water Ingress",
+        "Tank Leakage",
+        "Vent Pipe Issue",
+        "Fill Pipe Issue",
+    ],
+    "DU": [
+        "Hose Pipe",
+        "Nozzle Issue",
+        "Keypad Problem",
+        "Electronics Parts Issue",
+        "Display Problem",
+    ],
+    "CIVIL": [
+        "Painting Work",
+        "Brickwork",
+        "Structural Work",
+        "Canopy Related",
+    ],
+    "ELECTRICAL": [
+        "Replacement of Servo",
+        "Replacement of CVT",
+        "Cable Related",
+    ],
+    "OTHER": [],
 }
 
 SLA_HOURS = {
@@ -25,3 +45,35 @@ STATUS_FLOW = [
     "USER_CONFIRMATION",
     "CLOSED",
 ]
+
+
+def subtypes_for(category):
+    return list(PROBLEM_MASTER.get(category) or [])
+
+
+def match_subtype(category, *texts):
+    allowed = subtypes_for(category)
+    if not allowed:
+        return "Others"
+    blob = " ".join((t or "").strip() for t in texts).lower()
+    for item in allowed:
+        if item.lower() in blob or blob == item.lower():
+            return item
+    return ""
+
+
+def normalize_subtype(category, value, existing=""):
+    """Return a stored sub-category, or raise ValueError if a mapped type is missing one."""
+    allowed = subtypes_for(category)
+    value = (value or "").strip()
+    existing = (existing or "").strip()
+    if not allowed:
+        return value or "Others"
+    if value in allowed:
+        return value
+    matched = match_subtype(category, value)
+    if matched:
+        return matched
+    if existing and (not value or value == existing):
+        return existing
+    raise ValueError("Select a sub-category for this task type.")

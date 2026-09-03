@@ -9,6 +9,7 @@ from django.conf import settings
 
 from django.db.models import Q
 
+from .constants import match_subtype
 from .models import Complaint, User, Vendor
 
 
@@ -148,7 +149,10 @@ TOOLS = [
                         "enum": ["TANK", "DU", "CIVIL", "ELECTRICAL", "OTHER"],
                     },
                     "description": {"type": "string", "description": "The problem text. This is the only problem field — there is no separate specific_problem."},
-                    "specific_problem": {"type": "string", "description": "Optional short label. If omitted, the category label is used."},
+                    "specific_problem": {
+                        "type": "string",
+                        "description": "Sub-category for the task type, e.g. Tank Leakage, Hose Pipe, Painting Work.",
+                    },
                     "priority": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]},
                     "du_make": {"type": "string"},
                     "du_model": {"type": "string"},
@@ -174,18 +178,19 @@ Only show complaints, pumps, and vendors the tools return — that is already sc
 Typical questions: complaints for a vendor, open tickets at a pump, status of CMP-…, aging, category mix.
 
 When listing more than one complaint, use a GitHub-flavored markdown table with columns:
-Complaint ID | Pump | Category | Status | Priority | Vendor | Created
+Complaint ID | Pump | Category | Sub-category | Status | Priority | Vendor | Created
 Keep cell text short. Do not pad with spaces. After the table, add one short sentence if needed.
 
 To RAISE a complaint:
 1. Ask one missing thing at a time.
-2. Need: category (Tank Related, DU related, Civil Work, Electrical Work, Others), description, priority (Low / Medium / High).
-3. If category is DU related, also ask Make, Model, Sr. No.
-4. Customers use their mapped pump. Officers must pick a pump (use list_pumps).
-5. Show a short summary and ask them to confirm.
-6. When they say yes / confirm / lodge it, call lodge_complaint immediately with confirmed=true. Do not ask more questions.
-7. Never ask for a field named specific_problem. The description is the problem.
-8. Never lodge without confirmation.
+2. Need: category (Tank Related, DU related, Civil Work, Electrical Work, Others), matching sub-category, description, priority (Low / Medium / High).
+3. Sub-categories: Tank Related = Water Ingress, Tank Leakage, Vent Pipe Issue, Fill Pipe Issue. DU related = Hose Pipe, Nozzle Issue, Keypad Problem, Electronics Parts Issue, Display Problem. Civil Work = Painting Work, Brickwork, Structural Work, Canopy Related. Electrical Work = Replacement of Servo, Replacement of CVT, Cable Related. Others has no sub-category.
+4. If category is DU related, also ask Make, Model, Sr. No.
+5. Customers use their mapped pump. Officers must pick a pump (use list_pumps).
+6. Show a short summary and ask them to confirm.
+7. When they say yes / confirm / lodge it, call lodge_complaint immediately with confirmed=true. Do not ask more questions.
+8. Pass the sub-category in specific_problem. The description is the detailed problem.
+9. Never lodge without confirmation.
 
 Vendors cannot lodge complaints; they can only ask about jobs assigned to them.
 Be concise. If a tool returns no rows, say you found none in their access — do not invent tickets.
@@ -198,6 +203,7 @@ def _compact_complaint(c: Complaint) -> dict:
         "pump": c.pump.name,
         "pump_code": c.pump.pump_code,
         "category": c.get_category_display(),
+        "sub_category": c.specific_problem,
         "status": c.get_status_display(),
         "priority": c.get_priority_display(),
         "vendor": c.assigned_vendor.name if c.assigned_vendor_id else None,
@@ -302,10 +308,21 @@ def run_tool(user: User, name: str, arguments: dict, request) -> str:
                 }
             )
         description = (args.get("description") or "").strip()
+        category = (args.get("category") or "").upper()
+        from .constants import PROBLEM_MASTER, match_subtype
+
+        subtype = match_subtype(category, args.get("specific_problem"), description)
+        if PROBLEM_MASTER.get(category) and not subtype:
+            return _dumps(
+                {
+                    "error": "Select a sub-category for this task type.",
+                    "sub_categories": PROBLEM_MASTER.get(category),
+                }
+            )
         payload = {
-            "category": (args.get("category") or "").upper(),
+            "category": category,
             "description": description,
-            "specific_problem": ((args.get("specific_problem") or "").strip() or description)[:200],
+            "specific_problem": subtype or "Others",
             "priority": (args.get("priority") or "MEDIUM").upper(),
             "du_make": (args.get("du_make") or "").strip(),
             "du_model": (args.get("du_model") or "").strip(),
@@ -473,7 +490,7 @@ def _extract_lodge_args(user: User, messages: list) -> dict | None:
         "confirmed": True,
         "category": category,
         "description": description[:2000],
-        "specific_problem": description[:200],
+        "specific_problem": match_subtype(category, description) or description[:200],
         "priority": priority,
         "du_make": make,
         "du_model": model,

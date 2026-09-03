@@ -1,7 +1,7 @@
 from django.conf import settings
 from rest_framework import serializers
 
-from .constants import SLA_HOURS
+from .constants import SLA_HOURS, normalize_subtype
 from .geo import google_maps_url
 from .models import (
     Complaint,
@@ -609,6 +609,15 @@ class ComplaintSerializer(serializers.ModelSerializer):
             attrs["du_make"] = ""
             attrs["du_model"] = ""
             attrs["du_serial"] = ""
+        if "specific_problem" in attrs or "category" in attrs:
+            raw = attrs.get("specific_problem")
+            if raw is None:
+                raw = getattr(self.instance, "specific_problem", "")
+            existing = getattr(self.instance, "specific_problem", "") if self.instance else ""
+            try:
+                attrs["specific_problem"] = normalize_subtype(category, raw, existing=existing)
+            except ValueError as exc:
+                raise serializers.ValidationError({"specific_problem": str(exc)})
         return attrs
 
     def to_representation(self, instance):
@@ -621,7 +630,7 @@ class ComplaintSerializer(serializers.ModelSerializer):
             data["estimation_reviewed_at"] = None
             data["estimation_review_note"] = ""
             data["po_number"] = ""
-            data["media"] = [m for m in (data.get("media") or []) if m.get("kind") != "QUOTATION"]
+            data["media"] = [m for m in (data.get("media") or []) if m.get("kind") not in ("QUOTATION", "PO")]
         return data
 
     def create(self, validated_data):
@@ -632,7 +641,12 @@ class ComplaintSerializer(serializers.ModelSerializer):
             validated_data["pump"] = pump
         category = validated_data["category"]
         label = dict(Complaint.Category.choices).get(category, category)
-        validated_data["specific_problem"] = (validated_data.get("specific_problem") or "").strip() or label
+        try:
+            validated_data["specific_problem"] = normalize_subtype(
+                category, validated_data.get("specific_problem"), existing=""
+            )
+        except ValueError:
+            validated_data["specific_problem"] = (validated_data.get("specific_problem") or "").strip() or label
         complaint = Complaint.objects.create(
             complaint_id=self._next_id(),
             submitted_by=request.user,
